@@ -64,7 +64,7 @@ config_t config;
 
 uint8_t EEPROM_read(uint16_t address)
 {
-	return eeprom_read_byte(address);
+	return eeprom_read_byte((void*)address);
 
 	/* Wait for completion of previous write */
 	//while(EECR & (1<<EEWE))
@@ -89,7 +89,7 @@ uint8_t config_read(uint8_t cfg_address, uint8_t cfg_type)
 	//return EEDR;
 
 	uint16_t address = (((uint16_t)cfg_address) << 2) + cfg_type + (uint16_t)(&ee_config);
-	return eeprom_read_byte(address);
+	return eeprom_read_byte((void*)address);
 }
 
 /*!
@@ -110,7 +110,7 @@ static int16_t EEPROM_write(uint16_t address, uint8_t data)
 		return 6; // write protection for configuration default/min/max data
 	}
 
-	eeprom_write_byte(address, data);
+	eeprom_write_byte((void*)address, data);
 
 	/*
 	 while(EECR & (1<<EEWE))
@@ -199,7 +199,7 @@ uint16_t eeprom_timers_read_raw(uint8_t offset)
 	if (offset != timmers_patch_offset)
 	{
 		uint16_t eeaddr = (uint16_t)offset * (uint16_t)sizeof(ee_timers[0][0]) + (uint16_t)ee_timers;
-		return eeprom_read_word(eeaddr);
+		return eeprom_read_word((void*)eeaddr);
 	}
 	else
 	{
@@ -228,7 +228,7 @@ int16_t eeprom_timers_write_raw(int16_t offset, uint16_t value)
 
 	uint16_t eeaddr = offset * sizeof(ee_timers[0][0]) + (uint16_t)ee_timers;
 
-	eeprom_write_word(eeaddr, value);
+	eeprom_write_word((void*)eeaddr, value);
 	return 0;
 }
 

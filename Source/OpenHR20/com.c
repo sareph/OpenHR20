@@ -142,7 +142,10 @@ static char COM_getchar(void)
 	{
 		c = rx_buff[rx_buff_out++];
 		rx_buff_out %= RX_BUFF_SIZE;
-		COM_requests--;
+		if (c == '\n')
+		{
+			COM_requests--;
+		}
 	}
 	else
 	{
@@ -328,6 +331,7 @@ struct system_info
 	};
 		
 	uint8_t mode;
+	uint8_t error;
 	
 	int16_t tempActual;
 	int16_t tempSet;
@@ -335,8 +339,17 @@ struct system_info
 	int16_t valve;
 	int16_t batt;
 	
-	uint32_t flags;
+	uint16_t flags;
 };
+
+#define SI_FLAG_WINDOW_OPEN    0x0001
+#define SI_FLAG_MENU_LOCKED    0x0002
+
+#define SI_ERROR_BATT_LOW      0x80
+#define SI_ERROR_BATT_WARN     0x40
+#define SI_ERROR_RFM_SYNC      0x10
+#define SI_ERROR_MOTOR         0x08
+#define SI_ERROR_UNMOUNTED     0x04
 
 /*!
  *******************************************************************************
@@ -361,6 +374,7 @@ void COM_print_system_info(uint8_t type)
 	si.time.mm = RTC_GetMinute();
 	si.time.ss = RTC_GetSecond();
 	
+	si.error = CTL_error;
 	si.mode = CTL_mode_auto;
 	si.valve = valve_wanted;
 	si.batt = bat_average;
@@ -370,10 +384,21 @@ void COM_print_system_info(uint8_t type)
 	
 	si.flags = 0;
 	
+	if (mode_window())
+	{
+		si.flags |= SI_FLAG_WINDOW_OPEN;
+	}
+	
+	if (menu_locked)
+	{
+		si.flags |= SI_FLAG_MENU_LOCKED;
+	}
+
 	for (int i = 0; i < sizeof(struct system_info); ++i)
 	{
 		COM_putchar(((char *)&si)[i]);
 	}
+	
 	COM_flush();
 }
 

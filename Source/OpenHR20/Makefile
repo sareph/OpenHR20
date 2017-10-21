@@ -162,6 +162,7 @@ CFLAGS += -funsigned-bitfields
 CFLAGS += -fpack-struct
 CFLAGS += -fshort-enums
 CFLAGS += -Wall
+CFLAGS += -fno-toplevel-reorder
 #CFLAGS += --param inline-call-cost=2 
 CFLAGS += -finline-limit=10 
 #CFLAGS += -fno-inline-small-functions 
@@ -533,7 +534,6 @@ coff: $(TARGET).elf
 
 
 extcoff: $(TARGET).elf
-	@echo
 	@echo $(MSG_EXTENDED_COFF) $(TARGET).cof
 	$(COFFCONVERT) -O coff-ext-avr $< $(TARGET).cof
 
@@ -541,12 +541,10 @@ extcoff: $(TARGET).elf
 
 # Create final output files (.hex, .eep) from ELF output file.
 %.hex: %.elf
-	@echo
 	@echo $(MSG_FLASH) $@
 	$(OBJCOPY) -O $(FORMAT) -R .eeprom -R .fuse -R .lock $< $@
 
 %.bin: %.elf
-	@echo
 	@echo $(MSG_FLASH) $@
 	$(OBJCOPY) -O binary -R .eeprom -R .fuse -R .lock $< $@
 		
@@ -588,13 +586,13 @@ extcoff: $(TARGET).elf
 # Compile: create object files from C source files.
 $(OBJDIR)/%.o : %.c
 	@mkdir -p $(addprefix $(OBJDIR)/,$(dir $(<:../%=%)))
-	@echo $(MSG_COMPILING) $<
+	@echo $(MSG_COMPILING) $(notdir $<)
 	$(CC) -c $(ALL_CFLAGS) $< -o $@ 
 
 
 # Compile: create object files from C++ source files.
 $(OBJDIR)/%.o : %.cpp
-	@echo $(MSG_COMPILING_CPP) $<
+	@echo $(MSG_COMPILING_CPP) $(notdir $<)
 	$(CC) -c $(ALL_CPPFLAGS) $< -o $@ 
 
 

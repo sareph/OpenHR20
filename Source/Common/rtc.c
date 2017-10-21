@@ -619,8 +619,7 @@ static uint8_t RTC_next_compare;
 
 void RTC_timer_set(uint8_t timer_id, uint8_t time)
 {
-	uint8_t t2, i, next, dif;
-	// next is uninitialized, it is correct
+	uint8_t t2, i, next = 0, dif;
 
 	cli();
 	RTC_timer_todo |= _BV(timer_id);
@@ -735,7 +734,7 @@ ISR(TIMER2_COMP_vect)
 			}
 		}
 		uint8_t dif = 255;
-		uint8_t i, next;  // next is uninitialized, it is correct
+		uint8_t i, next = 0;  // next is uninitialized, it is correct
 		for (i = 0; i < RTC_TIMERS; i++)
 		{
 			if ((RTC_timer_todo&(2 << i)))

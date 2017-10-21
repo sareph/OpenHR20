@@ -1,3 +1,10 @@
+    - Fixed eeprom saving for timers (didnt work with new WINAVR)
+	- 
+
+/*********************
+Moved to GitHub.
+*********************/
+
 version 1.00BETA will be released soon
 
 SVN revision 103

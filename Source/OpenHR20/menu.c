@@ -462,7 +462,10 @@ bool menu_controller(bool new_state)
 					int16_t max_min_1 = (int16_t)(config_max(service_idx)) - min + 1;
 					config_raw[service_idx] = (uint8_t)(
 						((int16_t)(config_raw[service_idx]) + (int16_t)wheel - min + max_min_1) % max_min_1 + min);
-					if (service_idx == 0) LCD_Init();
+					if (service_idx == 0) 
+					{
+						LCD_Init();
+					}
 				}
 			}
 			break;
@@ -549,6 +552,18 @@ static void show_selected_temperature_type(uint8_t type, uint8_t mode)
 		? mode : LCD_MODE_OFF));
 }
 
+void menu_clear_home()
+{
+	if (CTL_mode_auto)
+	{
+		clr_show1(LCD_SEG_BAR24);
+	}
+	else
+	{
+		clr_show1(0);
+	}
+}	
+
 /*!
  *******************************************************************************
  * \brief menu View
@@ -609,7 +624,11 @@ void menu_view(bool update)
 			}
 			else
 			{
-				if (update) clr_show1(LCD_SEG_BAR24);
+				if (update) 
+				{
+					menu_clear_home();
+				}
+
 				if (CTL_error != 0)
 				{
 					if (CTL_error & CTL_ERR_BATT_LOW)
@@ -645,13 +664,26 @@ void menu_view(bool update)
 			}
 			// do not use break at this position / optimization
 		case menu_home_no_alter: // wanted temp
-			if (update) clr_show1(LCD_SEG_BAR24);
+			if (update) 
+			{
+				menu_clear_home();
+			}
+			
 			LCD_PrintTemp(CTL_temp_wanted, LCD_MODE_ON);
 			//! \note hourbar status calculation is complex we don't want calculate it every view, use chache
 MENU_COMMON_STATUS:
 			LCD_SetSeg(LCD_SEG_AUTO, (CTL_test_auto() ? LCD_MODE_ON : LCD_MODE_OFF));
 			LCD_SetSeg(LCD_SEG_MANU, (CTL_mode_auto ? LCD_MODE_OFF : LCD_MODE_ON));
-			LCD_HourBarBitmap(hourbar_buff);
+			
+			if (CTL_mode_auto)
+			{
+				LCD_HourBarBitmap(hourbar_buff);
+			}
+			else
+			{
+				LCD_HourBarBitmap(0);
+			}
+			
 			break;
 		case menu_home2: // real temperature
 			if (update) clr_show1(LCD_SEG_COL1);           // decimal point

@@ -143,6 +143,9 @@ static void CTL_window_detection(void)
  ******************************************************************************/
 void CTL_update(bool minute_ch)
 {
+#if STATUS_UPDATE_TIMEOUT
+	static int8_t statusUpdateTimeout = STATUS_UPDATE_TIMEOUT;
+#endif
 #if (HW_WINDOW_DETECTION)
 	PORTE |= _BV(PE2); // enable pull-up
 #endif
@@ -172,6 +175,15 @@ void CTL_update(bool minute_ch)
 		{
 			PID_force_update = 0;
 		}
+	}
+#endif
+
+#if STATUS_UPDATE_TIMEOUT
+	--statusUpdateTimeout;
+	if (0 == statusUpdateTimeout)
+	{
+		COM_print_debug(0);
+		statusUpdateTimeout = STATUS_UPDATE_TIMEOUT;
 	}
 #endif
 

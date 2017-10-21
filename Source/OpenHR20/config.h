@@ -83,6 +83,7 @@ In this file we define only configuration parameters, for example what kind of c
 /* #define COM_RS485  */
 /* Our default Adress, if not set or invalid */
 /* #define COM_DEF_ADR 1 */
+#define STATUS_UPDATE_TIMEOUT 180
 #endif
 
 #define DEFAULT_TEMPERATURE 2000

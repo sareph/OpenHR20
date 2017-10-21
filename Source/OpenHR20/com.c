@@ -394,9 +394,10 @@ void COM_print_system_info(uint8_t type)
 		si.flags |= SI_FLAG_MENU_LOCKED;
 	}
 
+	char *pTxBuf = (char*)&si;
 	for (int i = 0; i < sizeof(struct system_info); ++i)
 	{
-		COM_putchar(((char *)&si)[i]);
+		COM_putchar(pTxBuf[i]);
 	}
 	
 	COM_flush();

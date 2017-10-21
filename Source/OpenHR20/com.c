@@ -65,6 +65,8 @@ static uint8_t tx_buff_out = 0;
 static uint8_t rx_buff_in = 0;
 static uint8_t rx_buff_out = 0;
 
+static uint8_t sys_info_mode = 0;
+
 /*!
  *******************************************************************************
  *  \brief transmit bytes
@@ -292,19 +294,19 @@ void COM_init(void)
 	COM_flush();
 }
 
-struct system_time
-{
-	uint8_t hh;
-	uint8_t mm;
-	uint8_t ss;
-	uint8_t dow;
-};
-
 struct system_date
 {
 	uint16_t yy;
 	uint8_t  mm;
 	uint8_t  dd;
+};
+
+struct system_time
+{
+	uint8_t dow;
+	uint8_t hh;
+	uint8_t mm;
+	uint8_t ss;
 };
 
 struct system_info
@@ -316,15 +318,15 @@ struct system_info
 	union
 	{
 		uint32_t reserved1;
-		struct system_time time;
+		struct system_date date;
 	};
-	
+
 	union
 	{
 		uint32_t reserved2;
-		struct system_date date;
+		struct system_time time;
 	};
-	
+		
 	uint8_t mode;
 	
 	int16_t tempActual;
@@ -350,14 +352,14 @@ void COM_print_system_info(uint8_t type)
 	si.len = sizeof(struct system_info) - 5;
 	si.crc16 = 0;
 	
+	si.date.yy = RTC_GetYearYY() + 2000;
+	si.date.mm = RTC_GetMonth();
+	si.date.dd = RTC_GetDay();
+
 	si.time.dow = RTC_GetDayOfWeek();
 	si.time.hh = RTC_GetHour();
 	si.time.mm = RTC_GetMinute();
 	si.time.ss = RTC_GetSecond();
-
-	si.date.yy = RTC_GetYearYY() + 2000;
-	si.date.mm = RTC_GetMonth();
-	si.date.dd = RTC_GetDay();
 	
 	si.mode = CTL_mode_auto;
 	si.valve = valve_wanted;
@@ -381,7 +383,7 @@ void COM_print_system_info(uint8_t type)
  *
  *  \note
  ******************************************************************************/
-void COM_print_debug(uint8_t type)
+void COM_print_system_info_ascii(uint8_t type)
 {
 	print_s_p(PSTR("D: "));
 	print_hexXX(RTC_GetDayOfWeek() + 0xd0);
@@ -470,6 +472,18 @@ void COM_print_debug(uint8_t type)
 	rfm_start_tx();
 #endif
 
+}
+
+void COM_print_debug(uint8_t type)
+{
+	if (sys_info_mode)
+	{
+		COM_print_system_info(type);
+	}
+	else
+	{
+		COM_print_system_info_ascii(type);
+	}
 }
 
 /*!
@@ -562,18 +576,26 @@ void COM_commad_parse(void)
 		switch (c = COM_getchar())
 		{
 			case 'V':
-				if (COM_getchar() == '\n') print_version(false);
+				if (COM_getchar() == '\n')
+				{
+					print_version(false);
+				}
 				c = '\0';
 				break;
 #if ENABLE_LOCAL_COMMANDS
 			case 'D':
-				if (COM_getchar() == '\n') COM_print_debug(1);
+				if (COM_getchar() == '\n')
+				{
+					COM_print_debug(1);
+					sys_info_mode = 0;
+				}
 				c = '\0';
 				break;
 			case 'i':
 				if (COM_getchar() == '\n')
 				{
 					COM_print_system_info(1);
+					sys_info_mode = 1;
 				}
 				c = '\0';
 				break;
@@ -585,10 +607,11 @@ void COM_commad_parse(void)
 				}
 				print_idx(c, com_hex[0]);
 				print_hexXXXX(watch(com_hex[0]));
+				break;
 			}
-			break;
 			case 'G':
 			case 'S':
+			{
 				if (c == 'G')
 				{
 					if (COM_hex_parse(1 * 2) != '\0')
@@ -618,8 +641,10 @@ void COM_commad_parse(void)
 					print_hexXX(config_raw[com_hex[0]]);
 				}
 				break;
+			}
 			case 'R':
 			case 'W':
+			{
 				if (c == 'R')
 				{
 					if (COM_hex_parse(1 * 2) != '\0')
@@ -662,7 +687,9 @@ void COM_commad_parse(void)
 				print_hexXXXX(eeprom_timers_read_raw(
 					timers_get_raw_index((com_hex[0] >> 4), (com_hex[0] & 0xf))));
 				break;
+			}
 			case 'Y':
+			{
 				if (COM_hex_parse(3 * 2) != '\0')
 				{
 					break;
@@ -671,7 +698,9 @@ void COM_commad_parse(void)
 				COM_print_debug(1);
 				c = '\0';
 				break;
+			}
 			case 'H':
+			{
 				if (COM_hex_parse(3 * 2) != '\0')
 				{
 					break;
@@ -682,12 +711,14 @@ void COM_commad_parse(void)
 				COM_print_debug(1);
 				c = '\0';
 				break;
+			}
 			case 'B':
 			{
 				if (COM_hex_parse(2 * 2) != '\0')
 				{
 					break;
 				}
+			
 				if ((com_hex[0] == 0x13) && (com_hex[1] == 0x24))
 				{
 					cli();
@@ -697,6 +728,7 @@ void COM_commad_parse(void)
 				break;
 			}
 			case 'M':
+			{
 				if (COM_hex_parse(1 * 2) != '\0')
 				{
 					break;
@@ -705,7 +737,9 @@ void COM_commad_parse(void)
 				menu_view(true);
 				COM_print_debug(1);
 				break;
+			}
 			case 'A':
+			{
 				if (COM_hex_parse(1 * 2) != '\0')
 				{
 					break;
@@ -721,7 +755,9 @@ void COM_commad_parse(void)
 				CTL_set_temp(com_hex[0]);
 				COM_print_debug(1);
 				break;
+			}
 			case 'L':
+			{
 				if (COM_hex_parse(1 * 2) != '\0')
 				{
 					break;
@@ -729,14 +765,21 @@ void COM_commad_parse(void)
 				if (com_hex[0] <= 1) menu_locked = com_hex[0];
 				print_hexXX(menu_locked);
 				break;
+			}
 #endif
-				//case '\n':
-				//case '\0':
+			//case '\n':
+			//case '\0':	
 			default:
+			{
 				c = '\0';
 				break;
+			}
 		}
-		if (c != '\0') COM_putchar('\n');
+		
+		if (c != '\0')
+		{
+			COM_putchar('\n');
+		}
 		COM_flush();
 #if (RFM==1)
 		rfm_start_tx();

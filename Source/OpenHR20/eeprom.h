@@ -241,8 +241,8 @@ uint8_t EEPROM ee_config[][4] = {  // must be alligned to 4 bytes
 	/* 21 */{675 - 614, 675 - 614, 16, 255},   //!< value for 05C => 675 temperature calibration table
 #endif
 	/* 22 */{0, 0, 0, 1},   //!< timer_mode; =0 only one program, =1 programs for weekdays 
-	/* 23 */{120, 120, 80, 160},   //!< bat_warning_thld; treshold for battery warning [unit 0.02V]=[unit 0.01V per cell]
-	/* 24 */{100, 100, 80, 160},   //!< bat_low_thld; treshold for battery low [unit 0.02V]=[unit 0.01V per cell]
+	/* 23 */{110, 110, 80, 160},   //!< bat_warning_thld; treshold for battery warning [unit 0.02V]=[unit 0.01V per cell]
+	/* 24 */{90, 90, 80, 160},   //!< bat_low_thld; treshold for battery low [unit 0.02V]=[unit 0.01V per cell]
 	/* 25 */{1, 1, 0, 1},   //!< allow_ADC_during_motor
 #if HW_WINDOW_DETECTION
 	/* 26 */{1, 1, 0, 1},   //!< window_open_detection_enable

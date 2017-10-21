@@ -35,7 +35,7 @@
 
 #include "debug.h"
 
-char COM_tx_char_isr(void);
+int16_t COM_tx_char_isr(void);
 
 void COM_rx_char_isr(char c);
 

@@ -99,10 +99,10 @@ ISR(USART0_UDRE_vect)
 ISR(USART_UDRE_vect)
 #endif
 {
-	char c;
-	if ((c = COM_tx_char_isr()) != '\0')
+	int16_t c;
+	if ((c = COM_tx_char_isr()) >= 0)
 	{
-		UDR0 = c;
+		UDR0 = c & 0x00FF;
 	}
 	else	// no more chars, disable Interrupt
 	{

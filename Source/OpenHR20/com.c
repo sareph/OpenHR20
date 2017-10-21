@@ -88,9 +88,9 @@ void COM_putchar(char c)
  *
  *  \note
  ******************************************************************************/
-char COM_tx_char_isr(void)
+int16_t COM_tx_char_isr(void)
 {
-	char c = '\0';
+	int16_t c = -1;
 	if (tx_buff_in != tx_buff_out)
 	{
 		c = tx_buff[tx_buff_out++];
@@ -292,6 +292,88 @@ void COM_init(void)
 	COM_flush();
 }
 
+struct system_time
+{
+	uint8_t hh;
+	uint8_t mm;
+	uint8_t ss;
+	uint8_t dow;
+};
+
+struct system_date
+{
+	uint16_t yy;
+	uint8_t  mm;
+	uint8_t  dd;
+};
+
+struct system_info
+{
+	uint16_t magic; // 0xAA55
+	uint16_t crc16;
+	uint8_t len;
+	
+	union
+	{
+		uint32_t reserved1;
+		struct system_time time;
+	};
+	
+	union
+	{
+		uint32_t reserved2;
+		struct system_date date;
+	};
+	
+	uint8_t mode;
+	
+	int16_t tempActual;
+	int16_t tempSet;
+	
+	int16_t valve;
+	int16_t batt;
+	
+	uint32_t flags;
+};
+
+/*!
+ *******************************************************************************
+ *  \brief Print debug line
+ *
+ *  \note
+ ******************************************************************************/
+void COM_print_system_info(uint8_t type)
+{
+	struct system_info si;
+	
+	si.magic = 0xAA55;
+	si.len = sizeof(struct system_info) - 5;
+	si.crc16 = 0;
+	
+	si.time.dow = RTC_GetDayOfWeek();
+	si.time.hh = RTC_GetHour();
+	si.time.mm = RTC_GetMinute();
+	si.time.ss = RTC_GetSecond();
+
+	si.date.yy = RTC_GetYearYY() + 2000;
+	si.date.mm = RTC_GetMonth();
+	si.date.dd = RTC_GetDay();
+	
+	si.mode = CTL_mode_auto;
+	si.valve = valve_wanted;
+	si.batt = bat_average;
+	
+	si.tempActual = temp_average;
+	si.tempSet = calc_temp(CTL_temp_wanted_last);
+	
+	si.flags = 0;
+	
+	for (int i = 0; i < sizeof(struct system_info); ++i)
+	{
+		COM_putchar(((char *)&si)[i]);
+	}
+	COM_flush();
+}
 
 /*!
  *******************************************************************************
@@ -488,6 +570,13 @@ void COM_commad_parse(void)
 				if (COM_getchar() == '\n') COM_print_debug(1);
 				c = '\0';
 				break;
+			case 'i':
+				if (COM_getchar() == '\n')
+				{
+					COM_print_system_info(1);
+				}
+				c = '\0';
+				break;
 			case 'T':
 			{
 				if (COM_hex_parse(1 * 2) != '\0')
@@ -605,14 +694,15 @@ void COM_commad_parse(void)
 					wdt_enable(WDTO_15MS); //wd on,15ms
 					while (1); //loop till reset
 				}
+				break;
 			}
-			break;
 			case 'M':
 				if (COM_hex_parse(1 * 2) != '\0')
 				{
 					break;
 				}
 				CTL_change_mode(com_hex[0]);
+				menu_view(true);
 				COM_print_debug(1);
 				break;
 			case 'A':

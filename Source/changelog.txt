@@ -1,5 +1,6 @@
     - Fixed eeprom saving for timers (didnt work with new WINAVR)
-	- 
+	- Changed code format
+	- Only one timer is set by default
 
 /*********************
 Moved to GitHub.

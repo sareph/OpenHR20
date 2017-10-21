@@ -242,7 +242,14 @@ void CTL_update(bool minute_ch)
 				valveHistory[0] = new_valve;
 			}
 		}
-		COM_print_debug(0);
+#if STATUS_UPDATE_TIMEOUT
+		if(statusUpdateTimeout != STATUS_UPDATE_TIMEOUT) /* already sent in this cycle? */ 
+		{
+#endif
+			COM_print_debug(0);
+#if STATUS_UPDATE_TIMEOUT
+		}
+#endif
 		PID_force_update = -1; // invalid value = not used
 	}
 	// batt error detection

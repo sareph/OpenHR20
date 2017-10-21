@@ -1,0 +1,2272 @@
+   1               		.file	"rtc.c"
+   2               	__SP_H__ = 0x3e
+   3               	__SP_L__ = 0x3d
+   4               	__SREG__ = 0x3f
+   5               	__tmp_reg__ = 0
+   6               	__zero_reg__ = 1
+   7               		.text
+   8               	.Ltext0:
+   9               		.cfi_sections	.debug_frame
+  10               		.section	.text.RTC_DaysOfMonth,"ax",@progbits
+  12               	RTC_DaysOfMonth:
+  13               	.LFB16:
+  14               		.file 1 "../common/rtc.c"
+   1:../common/rtc.c **** /*
+   2:../common/rtc.c ****  *  Open HR20
+   3:../common/rtc.c ****  *
+   4:../common/rtc.c ****  *  target:     ATmega169 @ 4 MHz in Honnywell Rondostat HR20E
+   5:../common/rtc.c ****  *
+   6:../common/rtc.c ****  *  compiler:   WinAVR-20071221
+   7:../common/rtc.c ****  *              avr-libc 1.6.0
+   8:../common/rtc.c ****  *              GCC 4.2.2
+   9:../common/rtc.c ****  *
+  10:../common/rtc.c ****  *  copyright:  2008 Dario Carluccio (hr20-at-carluccio-dot-de)
+  11:../common/rtc.c ****  *				2008 Jiri Dobry (jdobry-at-centrum-dot-cz)
+  12:../common/rtc.c ****  *
+  13:../common/rtc.c ****  *  license:    This program is free software; you can redistribute it and/or
+  14:../common/rtc.c ****  *              modify it under the terms of the GNU Library General Public
+  15:../common/rtc.c ****  *              License as published by the Free Software Foundation; either
+  16:../common/rtc.c ****  *              version 2 of the License, or (at your option) any later version.
+  17:../common/rtc.c ****  *
+  18:../common/rtc.c ****  *              This program is distributed in the hope that it will be useful,
+  19:../common/rtc.c ****  *              but WITHOUT ANY WARRANTY; without even the implied warranty of
+  20:../common/rtc.c ****  *              MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+  21:../common/rtc.c ****  *              GNU General Public License for more details.
+  22:../common/rtc.c ****  *
+  23:../common/rtc.c ****  *              You should have received a copy of the GNU General Public License
+  24:../common/rtc.c ****  *              along with this program. If not, see http:*www.gnu.org/licenses
+  25:../common/rtc.c ****  */
+  26:../common/rtc.c **** 
+  27:../common/rtc.c **** /*!
+  28:../common/rtc.c ****  * \file       rtc.c
+  29:../common/rtc.c ****  * \brief      functions to control clock and timers
+  30:../common/rtc.c ****  * \author     Dario Carluccio <hr20-at-carluccio-dot-de>; Jiri Dobry <jdobry-at-centrum-dot-cz>
+  31:../common/rtc.c ****  * \date       $Date: 2010-02-02 23:29:38 +0100 (Wt, 02 lut 2010) $
+  32:../common/rtc.c ****  * $Rev: 278 $
+  33:../common/rtc.c ****  */
+  34:../common/rtc.c **** 
+  35:../common/rtc.c **** // AVR LibC includes
+  36:../common/rtc.c **** #include <stdint.h>
+  37:../common/rtc.c **** #include <avr/io.h>
+  38:../common/rtc.c **** #include <avr/interrupt.h>
+  39:../common/rtc.c **** #include <avr/pgmspace.h>
+  40:../common/rtc.c **** #include <avr/sleep.h>
+  41:../common/rtc.c **** #include <avr/version.h>
+  42:../common/rtc.c **** 
+  43:../common/rtc.c **** 
+  44:../common/rtc.c **** // HR20 Project includes
+  45:../common/rtc.c **** #include "config.h"
+  46:../common/rtc.c **** #include "main.h"
+  47:../common/rtc.c **** #include "../common/rtc.h"
+  48:../common/rtc.c **** #include "task.h"
+  49:../common/rtc.c **** #if !defined(MASTER_CONFIG_H)
+  50:../common/rtc.c **** #include "eeprom.h"
+  51:../common/rtc.c **** #include "menu.h"
+  52:../common/rtc.c **** #endif
+  53:../common/rtc.c **** 
+  54:../common/rtc.c **** // Vars
+  55:../common/rtc.c **** 
+  56:../common/rtc.c **** rtc_t RTC = {
+  57:../common/rtc.c **** 	BOOT_YY,
+  58:../common/rtc.c **** 	BOOT_MM,
+  59:../common/rtc.c **** 	BOOT_DD,
+  60:../common/rtc.c **** 	BOOT_hh,
+  61:../common/rtc.c **** 	BOOT_mm,
+  62:../common/rtc.c **** 	0,
+  63:../common/rtc.c **** 	0,
+  64:../common/rtc.c **** #if (RFM==1)
+  65:../common/rtc.c **** 	0
+  66:../common/rtc.c **** #endif
+  67:../common/rtc.c **** };
+  68:../common/rtc.c **** 
+  69:../common/rtc.c **** uint8_t RTC_DS;     //!< Daylightsaving Flag
+  70:../common/rtc.c **** #ifdef RTC_TICKS
+  71:../common/rtc.c **** uint32_t RTC_Ticks = 0; //!< Ticks since last Reset
+  72:../common/rtc.c **** #endif
+  73:../common/rtc.c **** 
+  74:../common/rtc.c **** // prototypes
+  75:../common/rtc.c **** static void    RTC_AddOneDay(void);        // add one day to actual date
+  76:../common/rtc.c **** static uint8_t RTC_DaysOfMonth(void);      // how many days in (RTC_MM, RTC_YY)
+  77:../common/rtc.c **** static void    RTC_SetDayOfWeek(void);     // calc day of week (RTC_DD, RTC_MM, RTC_YY)
+  78:../common/rtc.c **** static bool    RTC_IsLastSunday(void);     // check actual date if last sun in mar/oct
+  79:../common/rtc.c **** 
+  80:../common/rtc.c **** // year mod 100 = 0 is only every 400 years a leap year
+  81:../common/rtc.c **** // we calculate only till the year 2255, so don't care
+  82:../common/rtc.c **** #define RTC_NoLeapyear() (RTC.YY % 4) 
+  83:../common/rtc.c **** 
+  84:../common/rtc.c **** // Progmem constants
+  85:../common/rtc.c **** 
+  86:../common/rtc.c **** //! day of month for each month from january to december
+  87:../common/rtc.c **** const uint8_t RTC_DayOfMonthTablePrgMem[] PROGMEM =
+  88:../common/rtc.c **** {
+  89:../common/rtc.c **** 	31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31
+  90:../common/rtc.c **** };
+  91:../common/rtc.c **** 
+  92:../common/rtc.c **** 
+  93:../common/rtc.c **** /*!
+  94:../common/rtc.c ****  *******************************************************************************
+  95:../common/rtc.c ****  *  Init RTC
+  96:../common/rtc.c ****  *
+  97:../common/rtc.c ****  *  \note
+  98:../common/rtc.c ****  *  - Start Timer/Counter2 in asynchronous operation using a 32.768kHz crystal
+  99:../common/rtc.c ****  *  - Set Date after Reset
+ 100:../common/rtc.c ****  *  - set RTC_Ticks = 0
+ 101:../common/rtc.c ****  *
+ 102:../common/rtc.c ****  *  \param  pFunc   pointer to callback function for DOW timer
+ 103:../common/rtc.c ****  ******************************************************************************/
+ 104:../common/rtc.c **** void RTC_Init(void)
+ 105:../common/rtc.c **** {
+ 106:../common/rtc.c **** #if !defined(MASTER_CONFIG_H)
+ 107:../common/rtc.c **** 	TIMSK2 &= ~(1 << TOIE2);              // disable OCIE2A and TOIE2
+ 108:../common/rtc.c **** 	ASSR = (1 << AS2);                    // Timer2 asynchronous operation
+ 109:../common/rtc.c **** 	TCNT2 = 0;                          // clear TCNT2A
+ 110:../common/rtc.c **** 	TCCR2A |= TCCR2A_INIT;    // select precaler: 32.768 kHz / 128 =
+ 111:../common/rtc.c **** 	// => 1 sec between each overflow
+ 112:../common/rtc.c **** 
+ 113:../common/rtc.c **** 	// wait for TCN2UB and TCR2UB to be cleared
+ 114:../common/rtc.c **** 	while ((ASSR & (_BV(TCN2UB) | _BV(TCR2UB))) != 0);
+ 115:../common/rtc.c **** 
+ 116:../common/rtc.c **** 	TIFR2 = 0xFF;                       // clear interrupt-flags
+ 117:../common/rtc.c **** 	TIMSK2 |= (1 << TOIE2);               // enable Timer2 overflow interrupt
+ 118:../common/rtc.c **** #else
+ 119:../common/rtc.c **** 	OCR1A = 12500 - 1; // 1/100s interrupt
+ 120:../common/rtc.c **** 	TCCR1B = _BV(CS11) | _BV(WGM12); // clk/8 CTC mode
+ 121:../common/rtc.c **** 	TIFR = _BV(OCF1A);                       // clear interrupt-flags
+ 122:../common/rtc.c **** 	TIMSK |= _BV(OCIE1A);
+ 123:../common/rtc.c **** #endif
+ 124:../common/rtc.c **** 
+ 125:../common/rtc.c **** 	// day of week
+ 126:../common/rtc.c **** 	RTC_SetDayOfWeek();
+ 127:../common/rtc.c **** 
+ 128:../common/rtc.c **** 	//! \note OCR2A register and interrupt is used in \ref keyboard.c
+ 129:../common/rtc.c **** }
+ 130:../common/rtc.c **** 
+ 131:../common/rtc.c **** /*!
+ 132:../common/rtc.c ****  *******************************************************************************
+ 133:../common/rtc.c ****  *  set actual date
+ 134:../common/rtc.c ****  *  \param day new value for day
+ 135:../common/rtc.c ****  ******************************************************************************/
+ 136:../common/rtc.c **** void RTC_SetDay(int8_t day)
+ 137:../common/rtc.c **** {
+ 138:../common/rtc.c **** 	uint8_t day_in_m = RTC_DaysOfMonth();
+ 139:../common/rtc.c **** 	RTC.DD = (uint8_t)(day + (-1 + day_in_m)) % day_in_m + 1;
+ 140:../common/rtc.c **** 	RTC_SetDayOfWeek();
+ 141:../common/rtc.c **** }
+ 142:../common/rtc.c **** 
+ 143:../common/rtc.c **** /*!
+ 144:../common/rtc.c ****  *******************************************************************************
+ 145:../common/rtc.c ****  *  set actual date
+ 146:../common/rtc.c ****  *  \param month new value for month
+ 147:../common/rtc.c ****  ******************************************************************************/
+ 148:../common/rtc.c **** void RTC_SetMonth(int8_t month)
+ 149:../common/rtc.c **** {
+ 150:../common/rtc.c **** 	RTC.MM = (uint8_t)(month + (-1 + 12)) % 12 + 1;
+ 151:../common/rtc.c **** 	RTC_SetDayOfWeek();
+ 152:../common/rtc.c **** }
+ 153:../common/rtc.c **** 
+ 154:../common/rtc.c **** /*!
+ 155:../common/rtc.c ****  *******************************************************************************
+ 156:../common/rtc.c ****  *  set actual date
+ 157:../common/rtc.c ****  *  \param year new value for year
+ 158:../common/rtc.c ****  ******************************************************************************/
+ 159:../common/rtc.c **** void RTC_SetYear(uint8_t year)
+ 160:../common/rtc.c **** {
+ 161:../common/rtc.c **** 	RTC.YY = year;
+ 162:../common/rtc.c **** 	RTC_SetDayOfWeek();
+ 163:../common/rtc.c **** }
+ 164:../common/rtc.c **** 
+ 165:../common/rtc.c **** /*!
+ 166:../common/rtc.c ****  *******************************************************************************
+ 167:../common/rtc.c ****  *  set actual time
+ 168:../common/rtc.c ****  *  \param hour new value for hour
+ 169:../common/rtc.c ****  ******************************************************************************/
+ 170:../common/rtc.c **** void RTC_SetHour(int8_t hour)
+ 171:../common/rtc.c **** {
+ 172:../common/rtc.c **** 	RTC.hh = (uint8_t)(hour + 24) % 24;
+ 173:../common/rtc.c **** }
+ 174:../common/rtc.c **** 
+ 175:../common/rtc.c **** 
+ 176:../common/rtc.c **** /*!
+ 177:../common/rtc.c ****  *******************************************************************************
+ 178:../common/rtc.c ****  *  set actual time
+ 179:../common/rtc.c ****  *  \param minute new value for minute
+ 180:../common/rtc.c ****  ******************************************************************************/
+ 181:../common/rtc.c **** void RTC_SetMinute(int8_t minute)
+ 182:../common/rtc.c **** {
+ 183:../common/rtc.c **** 	RTC.mm = (uint8_t)(minute + 60) % 60;
+ 184:../common/rtc.c **** }
+ 185:../common/rtc.c **** 
+ 186:../common/rtc.c **** 
+ 187:../common/rtc.c **** /*!
+ 188:../common/rtc.c ****  *******************************************************************************
+ 189:../common/rtc.c ****  *  set actual time
+ 190:../common/rtc.c ****  *  \param second new value for second
+ 191:../common/rtc.c ****  ******************************************************************************/
+ 192:../common/rtc.c **** void RTC_SetSecond(int8_t second)
+ 193:../common/rtc.c **** {
+ 194:../common/rtc.c **** 	RTC.ss = (uint8_t)(second + 60) % 60;
+ 195:../common/rtc.c **** }
+ 196:../common/rtc.c **** 
+ 197:../common/rtc.c **** 
+ 198:../common/rtc.c **** #if defined(MASTER_CONFIG_H)
+ 199:../common/rtc.c **** /*!
+ 200:../common/rtc.c ****  *******************************************************************************
+ 201:../common/rtc.c ****  *  set actual time
+ 202:../common/rtc.c ****  *  \param second new value for 1/100 seconds
+ 203:../common/rtc.c ****  ******************************************************************************/
+ 204:../common/rtc.c **** void RTC_SetSecond100(uint8_t second100)
+ 205:../common/rtc.c **** {
+ 206:../common/rtc.c **** 	RTC_s100 = (second100 + 100) % 100;
+ 207:../common/rtc.c **** }
+ 208:../common/rtc.c **** #endif
+ 209:../common/rtc.c **** 
+ 210:../common/rtc.c **** #if !defined(MASTER_CONFIG_H)
+ 211:../common/rtc.c **** /*!
+ 212:../common/rtc.c ****  *******************************************************************************
+ 213:../common/rtc.c ****  *
+ 214:../common/rtc.c ****  *  set timer for one timerslot for one weekday
+ 215:../common/rtc.c ****  *
+ 216:../common/rtc.c ****  *  \param dow day of week
+ 217:../common/rtc.c ****  *  \param slot timeslot number
+ 218:../common/rtc.c ****  *  \param time time
+ 219:../common/rtc.c ****  *  \param timermode (type \ref timermode_t)
+ 220:../common/rtc.c ****  *
+ 221:../common/rtc.c ****  *  \note
+ 222:../common/rtc.c ****  *      - maximum timers for each weekday with \ref RTC_TIMERS_PER_DOW
+ 223:../common/rtc.c ****  *      - 1 minute intervals supported
+ 224:../common/rtc.c ****  *      - to deactivate timer: set value 0xfff
+ 225:../common/rtc.c ****  *
+ 226:../common/rtc.c ****  ******************************************************************************/
+ 227:../common/rtc.c **** int16_t RTC_DowTimerSet(rtc_dow_t dow, uint8_t slot, uint16_t time, timermode_t timermode)
+ 228:../common/rtc.c **** {
+ 229:../common/rtc.c **** 	if (dow >= _DOW_MAX)
+ 230:../common/rtc.c **** 	{
+ 231:../common/rtc.c **** 		return -1;
+ 232:../common/rtc.c **** 	}
+ 233:../common/rtc.c **** 
+ 234:../common/rtc.c **** 	if (slot >= RTC_TIMERS_PER_DOW)
+ 235:../common/rtc.c **** 	{
+ 236:../common/rtc.c **** 		return -2;
+ 237:../common/rtc.c **** 	}
+ 238:../common/rtc.c **** 
+ 239:../common/rtc.c **** 	if (timermode > temperature3)
+ 240:../common/rtc.c **** 	{
+ 241:../common/rtc.c **** 		return -3;
+ 242:../common/rtc.c **** 	}
+ 243:../common/rtc.c **** 
+ 244:../common/rtc.c **** 	if (time >= 60 * 25)
+ 245:../common/rtc.c **** 	{
+ 246:../common/rtc.c **** 		time = 0xfff;
+ 247:../common/rtc.c **** 	}
+ 248:../common/rtc.c **** 	// to table format see to \ref ee_timers
+ 249:../common/rtc.c **** 	return eeprom_timers_write(dow, slot, time | ((uint16_t)timermode << 12));
+ 250:../common/rtc.c **** }
+ 251:../common/rtc.c **** 
+ 252:../common/rtc.c **** /*!
+ 253:../common/rtc.c ****  *******************************************************************************
+ 254:../common/rtc.c ****  *
+ 255:../common/rtc.c ****  *  get timer for one timerslot for one weekday
+ 256:../common/rtc.c ****  *
+ 257:../common/rtc.c ****  *  \param dow day of week
+ 258:../common/rtc.c ****  *  \param slot timeslot number
+ 259:../common/rtc.c ****  *  \param *timermode (type \ref timermode_t)
+ 260:../common/rtc.c ****  *  \returns time
+ 261:../common/rtc.c ****  *
+ 262:../common/rtc.c ****  *  \note
+ 263:../common/rtc.c ****  *      - maximum timers for each weekday with \ref RTC_TIMERS_PER_DOW
+ 264:../common/rtc.c ****  *      - 1 minute intervals supported
+ 265:../common/rtc.c ****  *      - to deactivate timer: set value 0xfff
+ 266:../common/rtc.c ****  *
+ 267:../common/rtc.c ****  ******************************************************************************/
+ 268:../common/rtc.c **** uint16_t RTC_DowTimerGet(rtc_dow_t dow, uint8_t slot, timermode_t *timermode)
+ 269:../common/rtc.c **** {
+ 270:../common/rtc.c **** 	// to table format see to \ref ee_timers
+ 271:../common/rtc.c **** 	uint16_t raw = eeprom_timers_read_raw(timers_get_raw_index(dow, slot));
+ 272:../common/rtc.c **** 	*timermode = (timermode_t)(raw >> 12);
+ 273:../common/rtc.c **** 	return raw & 0x0fff;
+ 274:../common/rtc.c **** }
+ 275:../common/rtc.c **** 
+ 276:../common/rtc.c **** /*!
+ 277:../common/rtc.c ****  *******************************************************************************
+ 278:../common/rtc.c ****  *
+ 279:../common/rtc.c ****  *  get timer for dow and time
+ 280:../common/rtc.c ****  *
+ 281:../common/rtc.c ****  *  \param exact=true time must be equal
+ 282:../common/rtc.c ****  *  \param dow - day of week
+ 283:../common/rtc.c ****  *  \param time - time in minutes
+ 284:../common/rtc.c ****  *
+ 285:../common/rtc.c ****  *  \returns  index of timer
+ 286:../common/rtc.c ****  *
+ 287:../common/rtc.c ****  ******************************************************************************/
+ 288:../common/rtc.c **** 
+ 289:../common/rtc.c **** static uint8_t RTC_FindTimerRawIndex(uint8_t dow, uint16_t time_minutes)
+ 290:../common/rtc.c **** {
+ 291:../common/rtc.c **** 
+ 292:../common/rtc.c **** 	uint8_t search_timers = (dow > 0) ? 8 : 2;
+ 293:../common/rtc.c **** 	int8_t raw_index = -1;
+ 294:../common/rtc.c **** 	uint8_t i;
+ 295:../common/rtc.c **** 	for (i = 0; i < search_timers; i++)
+ 296:../common/rtc.c **** 	{
+ 297:../common/rtc.c **** 		{
+ 298:../common/rtc.c **** 			uint8_t idx_raw = timers_get_raw_index(dow, 0);
+ 299:../common/rtc.c **** 			uint8_t stop = idx_raw + RTC_TIMERS_PER_DOW;
+ 300:../common/rtc.c **** 			uint16_t maxtime = 0;
+ 301:../common/rtc.c **** 			// each timer until time_minutes
+ 302:../common/rtc.c **** 			for (; idx_raw < stop; idx_raw++)
+ 303:../common/rtc.c **** 			{
+ 304:../common/rtc.c **** 				// check if timer > maxtime and timer <= actual time
+ 305:../common/rtc.c **** 				uint16_t table_time = eeprom_timers_read_raw(idx_raw) & 0x0fff;
+ 306:../common/rtc.c **** 				if (table_time >= 24 * 60) continue;
+ 307:../common/rtc.c **** 				if ((table_time >= maxtime) && (table_time <= time_minutes))
+ 308:../common/rtc.c **** 				{
+ 309:../common/rtc.c **** 					maxtime = table_time;
+ 310:../common/rtc.c **** 					raw_index = idx_raw;
+ 311:../common/rtc.c **** 				}
+ 312:../common/rtc.c **** 			}
+ 313:../common/rtc.c **** 		}
+ 314:../common/rtc.c **** 		if (raw_index >= 0)
+ 315:../common/rtc.c **** 		{
+ 316:../common/rtc.c **** 			break;
+ 317:../common/rtc.c **** 		}
+ 318:../common/rtc.c **** 		if (dow > 0) dow = (dow + (7 - 2)) % 7 + 1;
+ 319:../common/rtc.c **** 		time_minutes = 24 * 60;
+ 320:../common/rtc.c **** 	}
+ 321:../common/rtc.c **** 	return raw_index;
+ 322:../common/rtc.c **** }
+ 323:../common/rtc.c **** 
+ 324:../common/rtc.c **** /*!
+ 325:../common/rtc.c ****  *******************************************************************************
+ 326:../common/rtc.c ****  *
+ 327:../common/rtc.c ****  *  get hour bar bitmap for DOW
+ 328:../common/rtc.c ****  *
+ 329:../common/rtc.c ****  *  \returns bitmap
+ 330:../common/rtc.c ****  *
+ 331:../common/rtc.c ****  *  \note battery expensive function, use buffer for result
+ 332:../common/rtc.c ****  *
+ 333:../common/rtc.c ****  ******************************************************************************/
+ 334:../common/rtc.c **** int32_t RTC_DowTimerGetHourBar(uint8_t dow)
+ 335:../common/rtc.c **** {
+ 336:../common/rtc.c **** 	int16_t time = 24 * 60;
+ 337:../common/rtc.c **** 	int8_t bar_pos = 23;
+ 338:../common/rtc.c **** 	uint32_t bitmap = 0;
+ 339:../common/rtc.c **** 
+ 340:../common/rtc.c **** 	while (time > 0)
+ 341:../common/rtc.c **** 	{
+ 342:../common/rtc.c **** 		int8_t raw_idx = RTC_FindTimerRawIndex(dow, time);
+ 343:../common/rtc.c **** 		uint16_t table_time = ((raw_idx >= 0) ? eeprom_timers_read_raw(raw_idx) : 0);
+ 344:../common/rtc.c **** 		bool bit = ((table_time & 0x3000) >= 0x2000);
+ 345:../common/rtc.c **** 		if ((table_time & 0xfff) < time)
+ 346:../common/rtc.c **** 		{
+ 347:../common/rtc.c **** 			time = (table_time & 0xfff) - 1;
+ 348:../common/rtc.c **** 		}
+ 349:../common/rtc.c **** 		else
+ 350:../common/rtc.c **** 		{
+ 351:../common/rtc.c **** 			time = -1;
+ 352:../common/rtc.c **** 		}
+ 353:../common/rtc.c **** 		{
+ 354:../common/rtc.c **** 			while (((int16_t)(bar_pos)) * 60 > time)
+ 355:../common/rtc.c **** 			{
+ 356:../common/rtc.c **** 				if (bit) bitmap |= 1;
+ 357:../common/rtc.c **** 				if (bar_pos > 0) bitmap = (bitmap << 1);
+ 358:../common/rtc.c **** 				bar_pos--;
+ 359:../common/rtc.c **** 			}
+ 360:../common/rtc.c **** 		}
+ 361:../common/rtc.c **** 	}
+ 362:../common/rtc.c **** 	return bitmap;
+ 363:../common/rtc.c **** }
+ 364:../common/rtc.c **** 
+ 365:../common/rtc.c **** /*!
+ 366:../common/rtc.c ****  *******************************************************************************
+ 367:../common/rtc.c ****  *
+ 368:../common/rtc.c ****  *  get actual temperature from timers
+ 369:../common/rtc.c ****  *
+ 370:../common/rtc.c ****  *  \param exact=true time must be equal
+ 371:../common/rtc.c ****  *
+ 372:../common/rtc.c ****  *  \returns temperature [see to \ref c2temp]
+ 373:../common/rtc.c ****  *
+ 374:../common/rtc.c ****  ******************************************************************************/
+ 375:../common/rtc.c **** 
+ 376:../common/rtc.c **** uint8_t RTC_ActualTimerTemperature(bool exact)
+ 377:../common/rtc.c **** {
+ 378:../common/rtc.c **** 	uint16_t minutes = RTC.hh * 60 + RTC.mm;
+ 379:../common/rtc.c **** 	int8_t dow = ((config.timer_mode == 1) ? RTC.DOW : 0);
+ 380:../common/rtc.c **** 	int8_t raw_index = RTC_FindTimerRawIndex(dow, minutes);
+ 381:../common/rtc.c **** 	uint16_t data = eeprom_timers_read_raw(raw_index);
+ 382:../common/rtc.c **** 	if (raw_index < 0) return 0; //not found
+ 383:../common/rtc.c **** 	if (exact)
+ 384:../common/rtc.c **** 	{
+ 385:../common/rtc.c **** 		if ((data & 0xfff) != minutes) return 0;
+ 386:../common/rtc.c **** 		if ((raw_index / RTC_TIMERS_PER_DOW) != dow) return 0;
+ 387:../common/rtc.c **** 	}
+ 388:../common/rtc.c **** 	return temperature_table[(data >> 12) & 3];
+ 389:../common/rtc.c **** }
+ 390:../common/rtc.c **** #endif // !defined(MASTER_CONFIG_H)
+ 391:../common/rtc.c **** 
+ 392:../common/rtc.c **** /*!
+ 393:../common/rtc.c ****  *******************************************************************************
+ 394:../common/rtc.c ****  *
+ 395:../common/rtc.c ****  *  Add one second to clock variables
+ 396:../common/rtc.c ****  *
+ 397:../common/rtc.c ****  *  \note
+ 398:../common/rtc.c ****  *    - calculate overflows, regarding leapyear, etc.
+ 399:../common/rtc.c ****  *    - process daylight saving
+ 400:../common/rtc.c ****  *       - last sunday in march 1:59:59 -> 3:00:00
+ 401:../common/rtc.c ****  *       - last sunday in october 2:59:59 -> 2:00:00 <BR>
+ 402:../common/rtc.c ****  *         ONLY ONE TIME -> set FLAG RTC_DS <BR>
+ 403:../common/rtc.c ****  *         reset FLAG RTC_DS on next day
+ 404:../common/rtc.c ****  *
+ 405:../common/rtc.c ****  *  \returns true if minutes changed, false otherwise
+ 406:../common/rtc.c ****  ******************************************************************************/
+ 407:../common/rtc.c **** void RTC_AddOneSecond(void)
+ 408:../common/rtc.c **** {
+ 409:../common/rtc.c **** #ifdef RTC_TICKS
+ 410:../common/rtc.c **** 	RTC_Ticks++;          // overflow every 136 Years
+ 411:../common/rtc.c **** #endif
+ 412:../common/rtc.c **** #if (RFM==1)
+ 413:../common/rtc.c **** 	RTC.pkt_cnt = 0;
+ 414:../common/rtc.c **** #endif
+ 415:../common/rtc.c **** 	if (++RTC.ss >= 60)
+ 416:../common/rtc.c **** 	{
+ 417:../common/rtc.c **** 		RTC.ss = 0;
+ 418:../common/rtc.c **** 		// notify com.c about the changed minute
+ 419:../common/rtc.c **** 		if (++RTC.mm >= 60)
+ 420:../common/rtc.c **** 		{
+ 421:../common/rtc.c **** 			RTC.mm = 0;
+ 422:../common/rtc.c **** 			// add one hour
+ 423:../common/rtc.c **** 			if (++RTC.hh >= 24)
+ 424:../common/rtc.c **** 			{
+ 425:../common/rtc.c **** 				RTC.hh = 0;
+ 426:../common/rtc.c **** 				RTC_AddOneDay();
+ 427:../common/rtc.c **** 			}
+ 428:../common/rtc.c **** 			// start of summertime: March, 2:00:00 ?
+ 429:../common/rtc.c **** 			if ((RTC.MM == 3) && (RTC.hh == 2))
+ 430:../common/rtc.c **** 			{
+ 431:../common/rtc.c **** 				// Last Sunday ?
+ 432:../common/rtc.c **** 				if (RTC_IsLastSunday())
+ 433:../common/rtc.c **** 				{
+ 434:../common/rtc.c **** 					RTC.hh++; // 2:00 -> 3:00
+ 435:../common/rtc.c **** 				}
+ 436:../common/rtc.c **** 			}
+ 437:../common/rtc.c **** 			// end of summertime: October, 03:00, RTC_DS == 0
+ 438:../common/rtc.c **** 			if ((RTC.MM == 10) && (RTC.hh == 3) && (RTC_DS == 0))
+ 439:../common/rtc.c **** 			{
+ 440:../common/rtc.c **** 				// Last Sunday ?
+ 441:../common/rtc.c **** 				if (RTC_IsLastSunday())
+ 442:../common/rtc.c **** 				{
+ 443:../common/rtc.c **** 					RTC.hh--; // 3:00 -> 2:00
+ 444:../common/rtc.c **** 					RTC_DS = 1;
+ 445:../common/rtc.c **** 				}
+ 446:../common/rtc.c **** 			}
+ 447:../common/rtc.c **** 		}
+ 448:../common/rtc.c **** 	}
+ 449:../common/rtc.c **** }
+ 450:../common/rtc.c **** 
+ 451:../common/rtc.c **** 
+ 452:../common/rtc.c **** /*!
+ 453:../common/rtc.c ****  *******************************************************************************
+ 454:../common/rtc.c ****  *
+ 455:../common/rtc.c ****  *  Add one day to date variables
+ 456:../common/rtc.c ****  *
+ 457:../common/rtc.c ****  *  \note
+ 458:../common/rtc.c ****  *       calculate overflows, regarding leapyear, etc.
+ 459:../common/rtc.c ****  *
+ 460:../common/rtc.c ****  ******************************************************************************/
+ 461:../common/rtc.c **** static void RTC_AddOneDay(void)
+ 462:../common/rtc.c **** {
+ 463:../common/rtc.c **** 	uint8_t dom;
+ 464:../common/rtc.c **** 	// How many day has actual month
+ 465:../common/rtc.c **** 	dom = RTC_DaysOfMonth();
+ 466:../common/rtc.c **** 	if (++RTC.DD > dom)
+ 467:../common/rtc.c **** 	{                   // Next Month
+ 468:../common/rtc.c **** 		RTC.DD = 1;
+ 469:../common/rtc.c **** 		if (++RTC.MM > 12)
+ 470:../common/rtc.c **** 		{                    // Next year
+ 471:../common/rtc.c **** 			RTC.MM = 1;
+ 472:../common/rtc.c **** 			RTC.YY++;
+ 473:../common/rtc.c **** 		}
+ 474:../common/rtc.c **** 		// Clear Daylight saving Flag
+ 475:../common/rtc.c **** 		RTC_DS = 0;
+ 476:../common/rtc.c **** 	}
+ 477:../common/rtc.c **** 	// next day of week
+ 478:../common/rtc.c **** 	RTC.DOW = (RTC.DOW % 7) + 1; // Monday = 1 Sat=7
+ 479:../common/rtc.c **** #if !defined(MASTER_CONFIG_H)
+ 480:../common/rtc.c **** 	// update hourbar
+ 481:../common/rtc.c **** 	menu_update_hourbar((config.timer_mode == 1) ? RTC.DOW : 0);
+ 482:../common/rtc.c **** #endif
+ 483:../common/rtc.c **** }
+ 484:../common/rtc.c **** 
+ 485:../common/rtc.c **** 
+ 486:../common/rtc.c **** /*!
+ 487:../common/rtc.c ****  *******************************************************************************
+ 488:../common/rtc.c ****  *
+ 489:../common/rtc.c ****  *  \returns number of days for actual month (1-12) and year (0-255: 2000-2255)
+ 490:../common/rtc.c ****  *
+ 491:../common/rtc.c ****  ******************************************************************************/
+ 492:../common/rtc.c **** static uint8_t RTC_DaysOfMonth()
+ 493:../common/rtc.c **** {
+  15               		.loc 1 493 0
+  16               		.cfi_startproc
+  17               	/* prologue: function */
+  18               	/* frame size = 0 */
+  19               	/* stack size = 0 */
+  20               	.L__stack_usage = 0
+  21               	.LBB2:
+ 494:../common/rtc.c **** 	uint8_t dom = pgm_read_byte(&RTC_DayOfMonthTablePrgMem[RTC.MM - 1]);
+  22               		.loc 1 494 0
+  23 0000 9091 0000 		lds r25,RTC+1
+  24               	.LVL0:
+  25 0004 E92F      		mov r30,r25
+  26 0006 F0E0      		ldi r31,0
+  27 0008 E050      		subi r30,lo8(-(RTC_DayOfMonthTablePrgMem-1))
+  28 000a F040      		sbci r31,hi8(-(RTC_DayOfMonthTablePrgMem-1))
+  29               	/* #APP */
+  30               	 ;  494 "../common/rtc.c" 1
+  31 000c 8491      		lpm r24, Z
+  32               		
+  33               	 ;  0 "" 2
+  34               	.LVL1:
+  35               	/* #NOAPP */
+  36               	.LBE2:
+ 495:../common/rtc.c **** 	if ((RTC.MM == 2) && (!RTC_NoLeapyear()))
+  37               		.loc 1 495 0
+  38 000e 9230      		cpi r25,lo8(2)
+  39 0010 01F4      		brne .L2
+  40               		.loc 1 495 0 is_stmt 0 discriminator 1
+  41 0012 9091 0000 		lds r25,RTC
+  42               	.LVL2:
+  43 0016 9370      		andi r25,lo8(3)
+  44 0018 01F4      		brne .L2
+ 496:../common/rtc.c **** 		return 29; // leapyear feb=29
+  45               		.loc 1 496 0 is_stmt 1
+  46 001a 8DE1      		ldi r24,lo8(29)
+  47               	.LVL3:
+  48               	.L2:
+ 497:../common/rtc.c **** 	return dom;
+ 498:../common/rtc.c **** }
+  49               		.loc 1 498 0
+  50 001c 0895      		ret
+  51               		.cfi_endproc
+  52               	.LFE16:
+  54               		.section	.text.RTC_IsLastSunday,"ax",@progbits
+  56               	RTC_IsLastSunday:
+  57               	.LFB17:
+ 499:../common/rtc.c **** 
+ 500:../common/rtc.c **** 
+ 501:../common/rtc.c **** /*!
+ 502:../common/rtc.c ****  *******************************************************************************
+ 503:../common/rtc.c ****  *
+ 504:../common/rtc.c ****  *  \returns \ref true if actual date is last sunday in march or october
+ 505:../common/rtc.c ****  *
+ 506:../common/rtc.c ****  ******************************************************************************/
+ 507:../common/rtc.c **** static bool RTC_IsLastSunday(void)
+ 508:../common/rtc.c **** {
+  58               		.loc 1 508 0
+  59               		.cfi_startproc
+  60               	/* prologue: function */
+  61               	/* frame size = 0 */
+  62               	/* stack size = 0 */
+  63               	.L__stack_usage = 0
+ 509:../common/rtc.c **** 	if (RTC.DOW != 7)
+  64               		.loc 1 509 0
+  65 0000 8091 0000 		lds r24,RTC+6
+  66 0004 8730      		cpi r24,lo8(7)
+  67 0006 01F4      		brne .L12
+ 510:../common/rtc.c **** 	{ // sunday ?
+ 511:../common/rtc.c **** 		return 0;  // not sunday
+ 512:../common/rtc.c **** 	}
+ 513:../common/rtc.c **** 	// March or October ?
+ 514:../common/rtc.c **** 	if (RTC.MM == 3)
+  68               		.loc 1 514 0
+  69 0008 8091 0000 		lds r24,RTC+1
+  70 000c 8330      		cpi r24,lo8(3)
+  71 000e 01F4      		brne .L8
+ 515:../common/rtc.c **** 	{
+ 516:../common/rtc.c **** 		// last seven days of month
+ 517:../common/rtc.c **** 		return (RTC.DD > (31 - 7));
+  72               		.loc 1 517 0
+  73 0010 81E0      		ldi r24,lo8(1)
+  74 0012 9091 0000 		lds r25,RTC+2
+  75 0016 9931      		cpi r25,lo8(25)
+  76 0018 00F4      		brsh .L7
+  77 001a 00C0      		rjmp .L12
+  78               	.L8:
+ 518:../common/rtc.c **** 	}
+ 519:../common/rtc.c **** 	else if (RTC.MM == 10)
+  79               		.loc 1 519 0
+  80 001c 8A30      		cpi r24,lo8(10)
+  81 001e 01F4      		brne .L12
+ 520:../common/rtc.c **** 	{
+ 521:../common/rtc.c **** 		// last seven days of month
+ 522:../common/rtc.c **** 		return (RTC.DD > (30 - 7));
+  82               		.loc 1 522 0
+  83 0020 81E0      		ldi r24,lo8(1)
+  84 0022 9091 0000 		lds r25,RTC+2
+  85 0026 9831      		cpi r25,lo8(24)
+  86 0028 00F4      		brsh .L7
+  87               	.L12:
+ 511:../common/rtc.c **** 	}
+  88               		.loc 1 511 0
+  89 002a 80E0      		ldi r24,0
+  90               	.L7:
+ 523:../common/rtc.c **** 	}
+ 524:../common/rtc.c **** 	else
+ 525:../common/rtc.c **** 	{
+ 526:../common/rtc.c **** 		return 0;  // not march or october
+ 527:../common/rtc.c **** 	}
+ 528:../common/rtc.c **** }
+  91               		.loc 1 528 0
+  92 002c 0895      		ret
+  93               		.cfi_endproc
+  94               	.LFE17:
+  96               		.section	.text.RTC_FindTimerRawIndex,"ax",@progbits
+  98               	RTC_FindTimerRawIndex:
+  99               	.LFB11:
+ 290:../common/rtc.c **** 
+ 100               		.loc 1 290 0
+ 101               		.cfi_startproc
+ 102               	.LVL4:
+ 103 0000 A1E0      		ldi r26,lo8(1)
+ 104 0002 B0E0      		ldi r27,0
+ 105 0004 E0E0      		ldi r30,lo8(gs(1f))
+ 106 0006 F0E0      		ldi r31,hi8(gs(1f))
+ 107 0008 0C94 0000 		jmp __prologue_saves__+((18 - 13) * 2)
+ 108               	1:
+ 109               	.LCFI0:
+ 110               		.cfi_offset 7, -2
+ 111               		.cfi_offset 8, -3
+ 112               		.cfi_offset 9, -4
+ 113               		.cfi_offset 10, -5
+ 114               		.cfi_offset 11, -6
+ 115               		.cfi_offset 12, -7
+ 116               		.cfi_offset 13, -8
+ 117               		.cfi_offset 14, -9
+ 118               		.cfi_offset 15, -10
+ 119               		.cfi_offset 16, -11
+ 120               		.cfi_offset 17, -12
+ 121               		.cfi_offset 28, -13
+ 122               		.cfi_offset 29, -14
+ 123               		.cfi_def_cfa 28, 16
+ 124               	/* prologue: function */
+ 125               	/* frame size = 1 */
+ 126               	/* stack size = 14 */
+ 127               	.L__stack_usage = 14
+ 128 000c 782E      		mov r7,r24
+ 129 000e 6B01      		movw r12,r22
+ 292:../common/rtc.c **** 	int8_t raw_index = -1;
+ 130               		.loc 1 292 0
+ 131 0010 8111      		cpse r24,__zero_reg__
+ 132 0012 00C0      		rjmp .L22
+ 133 0014 42E0      		ldi r20,lo8(2)
+ 134 0016 00C0      		rjmp .L14
+ 135               	.L22:
+ 136 0018 48E0      		ldi r20,lo8(8)
+ 137               	.L14:
+ 138               	.LVL5:
+ 295:../common/rtc.c **** 	{
+ 139               		.loc 1 295 0 discriminator 4
+ 140 001a E12C      		mov r14,__zero_reg__
+ 293:../common/rtc.c **** 	uint8_t i;
+ 141               		.loc 1 293 0 discriminator 4
+ 142 001c FF24      		clr r15
+ 143 001e FA94      		dec r15
+ 318:../common/rtc.c **** 		time_minutes = 24 * 60;
+ 144               		.loc 1 318 0 discriminator 4
+ 145 0020 07E0      		ldi r16,lo8(7)
+ 146 0022 10E0      		ldi r17,0
+ 147               	.LVL6:
+ 148               	.L20:
+ 149               	.LBB3:
+ 298:../common/rtc.c **** 			uint8_t stop = idx_raw + RTC_TIMERS_PER_DOW;
+ 150               		.loc 1 298 0
+ 151 0024 872C      		mov r8,r7
+ 152 0026 880C      		lsl r8
+ 153 0028 880C      		lsl r8
+ 154 002a 880C      		lsl r8
+ 155               	.LVL7:
+ 299:../common/rtc.c **** 			uint16_t maxtime = 0;
+ 156               		.loc 1 299 0
+ 157 002c 98E0      		ldi r25,lo8(8)
+ 158 002e 992E      		mov r9,r25
+ 159 0030 980C      		add r9,r8
+ 160               	.LVL8:
+ 300:../common/rtc.c **** 			// each timer until time_minutes
+ 161               		.loc 1 300 0
+ 162 0032 A12C      		mov r10,__zero_reg__
+ 163 0034 B12C      		mov r11,__zero_reg__
+ 164               	.LVL9:
+ 165               	.L15:
+ 302:../common/rtc.c **** 			{
+ 166               		.loc 1 302 0 discriminator 1
+ 167 0036 8914      		cp r8,r9
+ 168 0038 00F4      		brsh .L28
+ 169               	.LBB4:
+ 305:../common/rtc.c **** 				if (table_time >= 24 * 60) continue;
+ 170               		.loc 1 305 0
+ 171 003a 882D      		mov r24,r8
+ 172 003c 4983      		std Y+1,r20
+ 173 003e 0E94 0000 		call eeprom_timers_read_raw
+ 174               	.LVL10:
+ 175 0042 9F70      		andi r25,15
+ 176               	.LVL11:
+ 306:../common/rtc.c **** 				if ((table_time >= maxtime) && (table_time <= time_minutes))
+ 177               		.loc 1 306 0
+ 178 0044 4981      		ldd r20,Y+1
+ 179 0046 803A      		cpi r24,-96
+ 180 0048 25E0      		ldi r18,5
+ 181 004a 9207      		cpc r25,r18
+ 182 004c 00F4      		brsh .L16
+ 307:../common/rtc.c **** 				{
+ 183               		.loc 1 307 0
+ 184 004e 8A15      		cp r24,r10
+ 185 0050 9B05      		cpc r25,r11
+ 186 0052 00F0      		brlo .L16
+ 307:../common/rtc.c **** 				{
+ 187               		.loc 1 307 0 is_stmt 0 discriminator 1
+ 188 0054 C816      		cp r12,r24
+ 189 0056 D906      		cpc r13,r25
+ 190 0058 00F0      		brlo .L16
+ 191               	.LVL12:
+ 310:../common/rtc.c **** 				}
+ 192               		.loc 1 310 0 is_stmt 1
+ 193 005a F82C      		mov r15,r8
+ 194               	.LVL13:
+ 195 005c 5C01      		movw r10,r24
+ 196               	.LVL14:
+ 197               	.L16:
+ 198               	.LBE4:
+ 302:../common/rtc.c **** 			{
+ 199               		.loc 1 302 0
+ 200 005e 8394      		inc r8
+ 201               	.LVL15:
+ 202 0060 00C0      		rjmp .L15
+ 203               	.LVL16:
+ 204               	.L28:
+ 205               	.LBE3:
+ 314:../common/rtc.c **** 		{
+ 206               		.loc 1 314 0
+ 207 0062 F7FE      		sbrs r15,7
+ 208 0064 00C0      		rjmp .L27
+ 318:../common/rtc.c **** 		time_minutes = 24 * 60;
+ 209               		.loc 1 318 0
+ 210 0066 7720      		tst r7
+ 211 0068 01F0      		breq .L19
+ 318:../common/rtc.c **** 		time_minutes = 24 * 60;
+ 212               		.loc 1 318 0 is_stmt 0 discriminator 1
+ 213 006a 272D      		mov r18,r7
+ 214 006c 30E0      		ldi r19,0
+ 215 006e C901      		movw r24,r18
+ 216 0070 0596      		adiw r24,5
+ 217 0072 B801      		movw r22,r16
+ 218 0074 0E94 0000 		call __divmodhi4
+ 219 0078 7724      		clr r7
+ 220 007a 7394      		inc r7
+ 221               	.LVL17:
+ 222 007c 780E      		add r7,r24
+ 223               	.LVL18:
+ 224               	.L19:
+ 295:../common/rtc.c **** 	{
+ 225               		.loc 1 295 0 is_stmt 1 discriminator 2
+ 226 007e E394      		inc r14
+ 227               	.LVL19:
+ 319:../common/rtc.c **** 	}
+ 228               		.loc 1 319 0 discriminator 2
+ 229 0080 80EA      		ldi r24,lo8(-96)
+ 230 0082 C82E      		mov r12,r24
+ 231 0084 85E0      		ldi r24,lo8(5)
+ 232 0086 D82E      		mov r13,r24
+ 295:../common/rtc.c **** 	{
+ 233               		.loc 1 295 0 discriminator 2
+ 234 0088 E412      		cpse r14,r20
+ 235 008a 00C0      		rjmp .L20
+ 236               	.LVL20:
+ 237               	.L27:
+ 322:../common/rtc.c **** 
+ 238               		.loc 1 322 0
+ 239 008c 8F2D      		mov r24,r15
+ 240               	/* epilogue start */
+ 241 008e 2196      		adiw r28,1
+ 242 0090 EDE0      		ldi r30, lo8(13)
+ 243 0092 0C94 0000 		jmp __epilogue_restores__ + ((18 - 13) * 2)
+ 244               		.cfi_endproc
+ 245               	.LFE11:
+ 247               		.section	.text.RTC_SetHour,"ax",@progbits
+ 248               	.global	RTC_SetHour
+ 250               	RTC_SetHour:
+ 251               	.LFB6:
+ 171:../common/rtc.c **** 	RTC.hh = (uint8_t)(hour + 24) % 24;
+ 252               		.loc 1 171 0
+ 253               		.cfi_startproc
+ 254               	.LVL21:
+ 255               	/* prologue: function */
+ 256               	/* frame size = 0 */
+ 257               	/* stack size = 0 */
+ 258               	.L__stack_usage = 0
+ 172:../common/rtc.c **** }
+ 259               		.loc 1 172 0
+ 260 0000 885E      		subi r24,lo8(-(24))
+ 261               	.LVL22:
+ 262 0002 68E1      		ldi r22,lo8(24)
+ 263 0004 0E94 0000 		call __udivmodqi4
+ 264               	.LVL23:
+ 265 0008 9093 0000 		sts RTC+3,r25
+ 266 000c 0895      		ret
+ 267               		.cfi_endproc
+ 268               	.LFE6:
+ 270               		.section	.text.RTC_SetMinute,"ax",@progbits
+ 271               	.global	RTC_SetMinute
+ 273               	RTC_SetMinute:
+ 274               	.LFB7:
+ 182:../common/rtc.c **** 	RTC.mm = (uint8_t)(minute + 60) % 60;
+ 275               		.loc 1 182 0
+ 276               		.cfi_startproc
+ 277               	.LVL24:
+ 278               	/* prologue: function */
+ 279               	/* frame size = 0 */
+ 280               	/* stack size = 0 */
+ 281               	.L__stack_usage = 0
+ 183:../common/rtc.c **** }
+ 282               		.loc 1 183 0
+ 283 0000 845C      		subi r24,lo8(-(60))
+ 284               	.LVL25:
+ 285 0002 6CE3      		ldi r22,lo8(60)
+ 286 0004 0E94 0000 		call __udivmodqi4
+ 287               	.LVL26:
+ 288 0008 9093 0000 		sts RTC+4,r25
+ 289 000c 0895      		ret
+ 290               		.cfi_endproc
+ 291               	.LFE7:
+ 293               		.section	.text.RTC_SetSecond,"ax",@progbits
+ 294               	.global	RTC_SetSecond
+ 296               	RTC_SetSecond:
+ 297               	.LFB8:
+ 193:../common/rtc.c **** 	RTC.ss = (uint8_t)(second + 60) % 60;
+ 298               		.loc 1 193 0
+ 299               		.cfi_startproc
+ 300               	.LVL27:
+ 301               	/* prologue: function */
+ 302               	/* frame size = 0 */
+ 303               	/* stack size = 0 */
+ 304               	.L__stack_usage = 0
+ 194:../common/rtc.c **** }
+ 305               		.loc 1 194 0
+ 306 0000 845C      		subi r24,lo8(-(60))
+ 307               	.LVL28:
+ 308 0002 6CE3      		ldi r22,lo8(60)
+ 309 0004 0E94 0000 		call __udivmodqi4
+ 310               	.LVL29:
+ 311 0008 9093 0000 		sts RTC+5,r25
+ 312 000c 0895      		ret
+ 313               		.cfi_endproc
+ 314               	.LFE8:
+ 316               		.section	.text.RTC_DowTimerSet,"ax",@progbits
+ 317               	.global	RTC_DowTimerSet
+ 319               	RTC_DowTimerSet:
+ 320               	.LFB9:
+ 228:../common/rtc.c **** 	if (dow >= _DOW_MAX)
+ 321               		.loc 1 228 0
+ 322               		.cfi_startproc
+ 323               	.LVL30:
+ 324               	/* prologue: function */
+ 325               	/* frame size = 0 */
+ 326               	/* stack size = 0 */
+ 327               	.L__stack_usage = 0
+ 229:../common/rtc.c **** 	{
+ 328               		.loc 1 229 0
+ 329 0000 8830      		cpi r24,8
+ 330 0002 9105      		cpc r25,__zero_reg__
+ 331 0004 00F4      		brsh .L35
+ 234:../common/rtc.c **** 	{
+ 332               		.loc 1 234 0
+ 333 0006 6830      		cpi r22,lo8(8)
+ 334 0008 00F4      		brsh .L36
+ 239:../common/rtc.c **** 	{
+ 335               		.loc 1 239 0
+ 336 000a 2430      		cpi r18,lo8(4)
+ 337 000c 00F4      		brsh .L37
+ 244:../common/rtc.c **** 	{
+ 338               		.loc 1 244 0
+ 339 000e 4C3D      		cpi r20,-36
+ 340 0010 35E0      		ldi r19,5
+ 341 0012 5307      		cpc r21,r19
+ 342 0014 00F0      		brlo .L34
+ 246:../common/rtc.c **** 	}
+ 343               		.loc 1 246 0
+ 344 0016 4FEF      		ldi r20,lo8(-1)
+ 345 0018 5FE0      		ldi r21,lo8(15)
+ 346               	.LVL31:
+ 347               	.L34:
+ 249:../common/rtc.c **** }
+ 348               		.loc 1 249 0
+ 349 001a 30E0      		ldi r19,0
+ 350 001c 322F      		mov r19,r18
+ 351 001e 2227      		clr r18
+ 352 0020 3295      		swap r19
+ 353 0022 307F      		andi r19,0xf0
+ 354               	.LVL32:
+ 355 0024 422B      		or r20,r18
+ 356 0026 532B      		or r21,r19
+ 357               	.LVL33:
+ 358 0028 70E0      		ldi r23,0
+ 359 002a 0E94 0000 		call eeprom_timers_write
+ 360               	.LVL34:
+ 361 002e 0895      		ret
+ 362               	.LVL35:
+ 363               	.L35:
+ 231:../common/rtc.c **** 	}
+ 364               		.loc 1 231 0
+ 365 0030 8FEF      		ldi r24,lo8(-1)
+ 366 0032 9FEF      		ldi r25,lo8(-1)
+ 367               	.LVL36:
+ 368 0034 0895      		ret
+ 369               	.LVL37:
+ 370               	.L36:
+ 236:../common/rtc.c **** 	}
+ 371               		.loc 1 236 0
+ 372 0036 8EEF      		ldi r24,lo8(-2)
+ 373 0038 9FEF      		ldi r25,lo8(-1)
+ 374               	.LVL38:
+ 375 003a 0895      		ret
+ 376               	.LVL39:
+ 377               	.L37:
+ 241:../common/rtc.c **** 	}
+ 378               		.loc 1 241 0
+ 379 003c 8DEF      		ldi r24,lo8(-3)
+ 380 003e 9FEF      		ldi r25,lo8(-1)
+ 381               	.LVL40:
+ 250:../common/rtc.c **** 
+ 382               		.loc 1 250 0
+ 383 0040 0895      		ret
+ 384               		.cfi_endproc
+ 385               	.LFE9:
+ 387               		.section	.text.RTC_DowTimerGet,"ax",@progbits
+ 388               	.global	RTC_DowTimerGet
+ 390               	RTC_DowTimerGet:
+ 391               	.LFB10:
+ 269:../common/rtc.c **** 	// to table format see to \ref ee_timers
+ 392               		.loc 1 269 0
+ 393               		.cfi_startproc
+ 394               	.LVL41:
+ 395 0000 CF93      		push r28
+ 396               	.LCFI1:
+ 397               		.cfi_def_cfa_offset 3
+ 398               		.cfi_offset 28, -2
+ 399 0002 DF93      		push r29
+ 400               	.LCFI2:
+ 401               		.cfi_def_cfa_offset 4
+ 402               		.cfi_offset 29, -3
+ 403               	/* prologue: function */
+ 404               	/* frame size = 0 */
+ 405               	/* stack size = 2 */
+ 406               	.L__stack_usage = 2
+ 407 0004 EA01      		movw r28,r20
+ 271:../common/rtc.c **** 	*timermode = (timermode_t)(raw >> 12);
+ 408               		.loc 1 271 0
+ 409 0006 98E0      		ldi r25,lo8(8)
+ 410 0008 899F      		mul r24,r25
+ 411 000a 600D      		add r22,r0
+ 412 000c 1124      		clr __zero_reg__
+ 413               	.LVL42:
+ 414 000e 862F      		mov r24,r22
+ 415               	.LVL43:
+ 416 0010 0E94 0000 		call eeprom_timers_read_raw
+ 417               	.LVL44:
+ 272:../common/rtc.c **** 	return raw & 0x0fff;
+ 418               		.loc 1 272 0
+ 419 0014 292F      		mov r18,r25
+ 420 0016 2295      		swap r18
+ 421 0018 2F70      		andi r18,lo8(15)
+ 422 001a 2883      		st Y,r18
+ 274:../common/rtc.c **** 
+ 423               		.loc 1 274 0
+ 424 001c 9F70      		andi r25,15
+ 425               	.LVL45:
+ 426               	/* epilogue start */
+ 427 001e DF91      		pop r29
+ 428 0020 CF91      		pop r28
+ 429               	.LVL46:
+ 430 0022 0895      		ret
+ 431               		.cfi_endproc
+ 432               	.LFE10:
+ 434               		.section	.text.RTC_DowTimerGetHourBar,"ax",@progbits
+ 435               	.global	RTC_DowTimerGetHourBar
+ 437               	RTC_DowTimerGetHourBar:
+ 438               	.LFB12:
+ 335:../common/rtc.c **** 	int16_t time = 24 * 60;
+ 439               		.loc 1 335 0
+ 440               		.cfi_startproc
+ 441               	.LVL47:
+ 442 0000 A0E0      		ldi r26,0
+ 443 0002 B0E0      		ldi r27,0
+ 444 0004 E0E0      		ldi r30,lo8(gs(1f))
+ 445 0006 F0E0      		ldi r31,hi8(gs(1f))
+ 446 0008 0C94 0000 		jmp __prologue_saves__+((18 - 8) * 2)
+ 447               	1:
+ 448               	.LCFI3:
+ 449               		.cfi_offset 12, -2
+ 450               		.cfi_offset 13, -3
+ 451               		.cfi_offset 14, -4
+ 452               		.cfi_offset 15, -5
+ 453               		.cfi_offset 16, -6
+ 454               		.cfi_offset 17, -7
+ 455               		.cfi_offset 28, -8
+ 456               		.cfi_offset 29, -9
+ 457               		.cfi_def_cfa_offset 10
+ 458               	/* prologue: function */
+ 459               	/* frame size = 0 */
+ 460               	/* stack size = 8 */
+ 461               	.L__stack_usage = 8
+ 462 000c 082F      		mov r16,r24
+ 463               	.LVL48:
+ 338:../common/rtc.c **** 
+ 464               		.loc 1 338 0
+ 465 000e C12C      		mov r12,__zero_reg__
+ 466 0010 D12C      		mov r13,__zero_reg__
+ 467 0012 7601      		movw r14,r12
+ 337:../common/rtc.c **** 	uint32_t bitmap = 0;
+ 468               		.loc 1 337 0
+ 469 0014 17E1      		ldi r17,lo8(23)
+ 336:../common/rtc.c **** 	int8_t bar_pos = 23;
+ 470               		.loc 1 336 0
+ 471 0016 C0EA      		ldi r28,lo8(-96)
+ 472 0018 D5E0      		ldi r29,lo8(5)
+ 473               	.LVL49:
+ 474               	.L46:
+ 475               	.LBB5:
+ 342:../common/rtc.c **** 		uint16_t table_time = ((raw_idx >= 0) ? eeprom_timers_read_raw(raw_idx) : 0);
+ 476               		.loc 1 342 0
+ 477 001a BE01      		movw r22,r28
+ 478 001c 802F      		mov r24,r16
+ 479 001e 0E94 0000 		call RTC_FindTimerRawIndex
+ 480               	.LVL50:
+ 343:../common/rtc.c **** 		bool bit = ((table_time & 0x3000) >= 0x2000);
+ 481               		.loc 1 343 0
+ 482 0022 87FD      		sbrc r24,7
+ 483 0024 00C0      		rjmp .L47
+ 343:../common/rtc.c **** 		bool bit = ((table_time & 0x3000) >= 0x2000);
+ 484               		.loc 1 343 0 is_stmt 0 discriminator 1
+ 485 0026 0E94 0000 		call eeprom_timers_read_raw
+ 486               	.LVL51:
+ 487 002a 00C0      		rjmp .L40
+ 488               	.LVL52:
+ 489               	.L47:
+ 343:../common/rtc.c **** 		bool bit = ((table_time & 0x3000) >= 0x2000);
+ 490               		.loc 1 343 0
+ 491 002c 80E0      		ldi r24,0
+ 492 002e 90E0      		ldi r25,0
+ 493               	.LVL53:
+ 494               	.L40:
+ 344:../common/rtc.c **** 		if ((table_time & 0xfff) < time)
+ 495               		.loc 1 344 0 is_stmt 1 discriminator 4
+ 496 0030 AC01      		movw r20,r24
+ 497 0032 4427      		clr r20
+ 498 0034 5073      		andi r21,48
+ 499               	.LVL54:
+ 345:../common/rtc.c **** 		{
+ 500               		.loc 1 345 0 discriminator 4
+ 501 0036 9C01      		movw r18,r24
+ 502 0038 3F70      		andi r19,15
+ 503 003a 2C17      		cp r18,r28
+ 504 003c 3D07      		cpc r19,r29
+ 505 003e 00F4      		brsh .L48
+ 347:../common/rtc.c **** 		}
+ 506               		.loc 1 347 0
+ 507 0040 E901      		movw r28,r18
+ 508               	.LVL55:
+ 509 0042 2197      		sbiw r28,1
+ 510               	.LVL56:
+ 511 0044 00C0      		rjmp .L42
+ 512               	.L48:
+ 351:../common/rtc.c **** 		}
+ 513               		.loc 1 351 0
+ 514 0046 CFEF      		ldi r28,lo8(-1)
+ 515 0048 DFEF      		ldi r29,lo8(-1)
+ 516               	.LVL57:
+ 517 004a 00C0      		rjmp .L42
+ 518               	.LVL58:
+ 519               	.L45:
+ 356:../common/rtc.c **** 				if (bar_pos > 0) bitmap = (bitmap << 1);
+ 520               		.loc 1 356 0
+ 521 004c 4115      		cp r20,__zero_reg__
+ 522 004e 20E2      		ldi r18,32
+ 523 0050 5207      		cpc r21,r18
+ 524 0052 00F0      		brlo .L43
+ 356:../common/rtc.c **** 				if (bar_pos > 0) bitmap = (bitmap << 1);
+ 525               		.loc 1 356 0 is_stmt 0 discriminator 1
+ 526 0054 6894      		set
+ 527 0056 C0F8      		bld r12,0
+ 528               	.LVL59:
+ 529               	.L43:
+ 357:../common/rtc.c **** 				bar_pos--;
+ 530               		.loc 1 357 0 is_stmt 1
+ 531 0058 1116      		cp __zero_reg__,r17
+ 532 005a 04F4      		brge .L44
+ 357:../common/rtc.c **** 				bar_pos--;
+ 533               		.loc 1 357 0 is_stmt 0 discriminator 1
+ 534 005c CC0C      		lsl r12
+ 535 005e DD1C      		rol r13
+ 536 0060 EE1C      		rol r14
+ 537 0062 FF1C      		rol r15
+ 538               	.LVL60:
+ 539               	.L44:
+ 540 0064 1150      		subi r17,lo8(-(-1))
+ 541               	.LVL61:
+ 542               	.L42:
+ 354:../common/rtc.c **** 			{
+ 543               		.loc 1 354 0 is_stmt 1
+ 544 0066 2CE3      		ldi r18,lo8(60)
+ 545 0068 1202      		muls r17,r18
+ 546 006a C001      		movw r24,r0
+ 547 006c 1124      		clr __zero_reg__
+ 548 006e C817      		cp r28,r24
+ 549 0070 D907      		cpc r29,r25
+ 550 0072 04F0      		brlt .L45
+ 551               	.LBE5:
+ 340:../common/rtc.c **** 	{
+ 552               		.loc 1 340 0
+ 553 0074 1C16      		cp __zero_reg__,r28
+ 554 0076 1D06      		cpc __zero_reg__,r29
+ 555 0078 04F0      		brlt .L46
+ 363:../common/rtc.c **** 
+ 556               		.loc 1 363 0
+ 557 007a C701      		movw r24,r14
+ 558 007c B601      		movw r22,r12
+ 559               	/* epilogue start */
+ 560 007e CDB7      		in r28,__SP_L__
+ 561 0080 DEB7      		in r29,__SP_H__
+ 562               	.LVL62:
+ 563 0082 E8E0      		ldi r30, lo8(8)
+ 564 0084 0C94 0000 		jmp __epilogue_restores__ + ((18 - 8) * 2)
+ 565               		.cfi_endproc
+ 566               	.LFE12:
+ 568               		.section	.text.RTC_SetDayOfWeek,"ax",@progbits
+ 570               	RTC_SetDayOfWeek:
+ 571               	.LFB18:
+ 529:../common/rtc.c **** 
+ 530:../common/rtc.c **** 
+ 531:../common/rtc.c **** /*!
+ 532:../common/rtc.c ****  *******************************************************************************
+ 533:../common/rtc.c ****  *
+ 534:../common/rtc.c ****  *  set day of week for actual date
+ 535:../common/rtc.c ****  *
+ 536:../common/rtc.c ****  *  \note
+ 537:../common/rtc.c ****  *     valid for years from 2000 to 2255
+ 538:../common/rtc.c ****  *  \return 1=monday to 7=sunday
+ 539:../common/rtc.c ****  *
+ 540:../common/rtc.c ****  ******************************************************************************/
+ 541:../common/rtc.c **** static const uint16_t daysInYear[12] PROGMEM = {
+ 542:../common/rtc.c **** 	0,
+ 543:../common/rtc.c **** 	31,
+ 544:../common/rtc.c **** 	31 + 28,
+ 545:../common/rtc.c **** 	31 + 28 + 31,
+ 546:../common/rtc.c **** 	31 + 28 + 31 + 30,
+ 547:../common/rtc.c **** 	31 + 28 + 31 + 30 + 31,
+ 548:../common/rtc.c **** 	31 + 28 + 31 + 30 + 31 + 30,
+ 549:../common/rtc.c **** 	31 + 28 + 31 + 30 + 31 + 30 + 31,
+ 550:../common/rtc.c **** 	31 + 28 + 31 + 30 + 31 + 30 + 31 + 31,
+ 551:../common/rtc.c **** 	31 + 28 + 31 + 30 + 31 + 30 + 31 + 31 + 30,
+ 552:../common/rtc.c **** 	31 + 28 + 31 + 30 + 31 + 30 + 31 + 31 + 30 + 31,
+ 553:../common/rtc.c **** 	31 + 28 + 31 + 30 + 31 + 30 + 31 + 31 + 30 + 31 + 30};
+ 554:../common/rtc.c **** 
+ 555:../common/rtc.c **** static void RTC_SetDayOfWeek(void)
+ 556:../common/rtc.c **** {
+ 572               		.loc 1 556 0
+ 573               		.cfi_startproc
+ 574               	/* prologue: function */
+ 575               	/* frame size = 0 */
+ 576               	/* stack size = 0 */
+ 577               	.L__stack_usage = 0
+ 578               	.LBB9:
+ 557:../common/rtc.c **** 	uint16_t day_of_year;
+ 558:../common/rtc.c **** 	uint16_t tmp_dow;
+ 559:../common/rtc.c **** 
+ 560:../common/rtc.c **** 	// Day of year
+ 561:../common/rtc.c **** 	day_of_year = pgm_read_word(&(daysInYear[RTC.MM - 1])) + RTC.DD;
+ 579               		.loc 1 561 0
+ 580 0000 9091 0000 		lds r25,RTC+1
+ 581 0004 E92F      		mov r30,r25
+ 582 0006 F0E0      		ldi r31,0
+ 583 0008 EE0F      		lsl r30
+ 584 000a FF1F      		rol r31
+ 585 000c E050      		subi r30,lo8(-(daysInYear-2))
+ 586 000e F040      		sbci r31,hi8(-(daysInYear-2))
+ 587               	.LVL63:
+ 588               	/* #APP */
+ 589               	 ;  561 "../common/rtc.c" 1
+ 590 0010 2591      		lpm r18, Z+
+ 591 0012 3491      		lpm r19, Z
+ 592               		
+ 593               	 ;  0 "" 2
+ 594               	.LVL64:
+ 595               	/* #NOAPP */
+ 596               	.LBE9:
+ 597 0014 8091 0000 		lds r24,RTC+2
+ 598 0018 280F      		add r18,r24
+ 599 001a 311D      		adc r19,__zero_reg__
+ 600               	.LVL65:
+ 601 001c E091 0000 		lds r30,RTC
+ 562:../common/rtc.c **** 	if (RTC.MM > 2)
+ 602               		.loc 1 562 0
+ 603 0020 9330      		cpi r25,lo8(3)
+ 604 0022 00F0      		brlo .L51
+ 563:../common/rtc.c **** 	{ // february
+ 564:../common/rtc.c **** 		if (!RTC_NoLeapyear())
+ 605               		.loc 1 564 0
+ 606 0024 8E2F      		mov r24,r30
+ 607 0026 8370      		andi r24,lo8(3)
+ 608 0028 01F4      		brne .L51
+ 565:../common/rtc.c **** 		{
+ 566:../common/rtc.c **** 			day_of_year++;
+ 609               		.loc 1 566 0
+ 610 002a 2F5F      		subi r18,-1
+ 611 002c 3F4F      		sbci r19,-1
+ 612               	.LVL66:
+ 613               	.L51:
+ 567:../common/rtc.c **** 		}
+ 568:../common/rtc.c **** 	}
+ 569:../common/rtc.c **** 	// calc weekday
+ 570:../common/rtc.c **** 	tmp_dow = RTC.YY + ((RTC.YY - 1) / 4) - ((RTC.YY - 1) / 100) + day_of_year;
+ 614               		.loc 1 570 0
+ 615 002e F0E0      		ldi r31,0
+ 616 0030 CF01      		movw r24,r30
+ 617 0032 0197      		sbiw r24,1
+ 618               	.LVL67:
+ 619 0034 AC01      		movw r20,r24
+ 620 0036 97FF      		sbrs r25,7
+ 621 0038 00C0      		rjmp .L52
+ 622 003a 4D5F      		subi r20,-3
+ 623 003c 5F4F      		sbci r21,-1
+ 624               	.L52:
+ 625 003e 5595      		asr r21
+ 626 0040 4795      		ror r20
+ 627 0042 5595      		asr r21
+ 628 0044 4795      		ror r20
+ 629 0046 E40F      		add r30,r20
+ 630 0048 F51F      		adc r31,r21
+ 631               	.LVL68:
+ 632 004a 6CE9      		ldi r22,lo8(-100)
+ 633 004c 7FEF      		ldi r23,lo8(-1)
+ 634 004e 0E94 0000 		call __divmodhi4
+ 635               	.LVL69:
+ 636 0052 CF01      		movw r24,r30
+ 637 0054 860F      		add r24,r22
+ 638 0056 971F      		adc r25,r23
+ 639 0058 0596      		adiw r24,5
+ 571:../common/rtc.c **** 	// set DOW
+ 572:../common/rtc.c **** 	RTC.DOW = (uint8_t)((tmp_dow + 5) % 7) + 1;
+ 640               		.loc 1 572 0
+ 641 005a 820F      		add r24,r18
+ 642 005c 931F      		adc r25,r19
+ 643 005e 67E0      		ldi r22,lo8(7)
+ 644 0060 70E0      		ldi r23,0
+ 645 0062 0E94 0000 		call __udivmodhi4
+ 646 0066 8F5F      		subi r24,lo8(-(1))
+ 647 0068 8093 0000 		sts RTC+6,r24
+ 573:../common/rtc.c **** 
+ 574:../common/rtc.c **** #if !defined(MASTER_CONFIG_H)
+ 575:../common/rtc.c **** 	menu_update_hourbar((config.timer_mode == 1) ? RTC.DOW : 0);
+ 648               		.loc 1 575 0
+ 649 006c 9091 0000 		lds r25,config+34
+ 650 0070 9130      		cpi r25,lo8(1)
+ 651 0072 01F0      		breq .L53
+ 652 0074 80E0      		ldi r24,0
+ 653               	.L53:
+ 654               	.LVL70:
+ 655               	.LBB10:
+ 656               	.LBB11:
+ 657               		.file 2 "./menu.h"
+   1:./menu.h      **** /*
+   2:./menu.h      ****  *  Open HR20
+   3:./menu.h      ****  *
+   4:./menu.h      ****  *  target:     ATmega169 @ 4 MHz in Honnywell Rondostat HR20E
+   5:./menu.h      ****  *
+   6:./menu.h      ****  *  compiler:   WinAVR-20071221
+   7:./menu.h      ****  *              avr-libc 1.6.0
+   8:./menu.h      ****  *              GCC 4.2.2
+   9:./menu.h      ****  *
+  10:./menu.h      ****  *  copyright:  2008 Jiri Dobry (jdobry-at-centrum-dot-cz)
+  11:./menu.h      ****  *
+  12:./menu.h      ****  *  license:    This program is free software; you can redistribute it and/or
+  13:./menu.h      ****  *              modify it under the terms of the GNU Library General Public
+  14:./menu.h      ****  *              License as published by the Free Software Foundation; either
+  15:./menu.h      ****  *              version 2 of the License, or (at your option) any later version.
+  16:./menu.h      ****  *
+  17:./menu.h      ****  *              This program is distributed in the hope that it will be useful,
+  18:./menu.h      ****  *              but WITHOUT ANY WARRANTY; without even the implied warranty of
+  19:./menu.h      ****  *              MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+  20:./menu.h      ****  *              GNU General Public License for more details.
+  21:./menu.h      ****  *
+  22:./menu.h      ****  *              You should have received a copy of the GNU General Public License
+  23:./menu.h      ****  *              along with this program. If not, see http:*www.gnu.org/licenses
+  24:./menu.h      ****  */
+  25:./menu.h      **** 
+  26:./menu.h      **** /*!
+  27:./menu.h      ****  * \file       menu.h
+  28:./menu.h      ****  * \brief      menu view & controler for free HR20E project
+  29:./menu.h      ****  * \author     Jiri Dobry <jdobry-at-centrum-dot-cz>
+  30:./menu.h      ****  * \date       $Date: 2011-02-24 15:51:55 +0100 (Cz, 24 lut 2011) $
+  31:./menu.h      ****  * $Rev: 293 $
+  32:./menu.h      ****  */
+  33:./menu.h      **** 
+  34:./menu.h      **** #pragma once
+  35:./menu.h      **** 
+  36:./menu.h      **** extern int8_t menu_auto_update_timeout;
+  37:./menu.h      **** bool menu_controller(bool new_state);
+  38:./menu.h      **** void menu_view(bool update);
+  39:./menu.h      **** 
+  40:./menu.h      **** extern bool menu_locked;
+  41:./menu.h      **** 
+  42:./menu.h      **** extern uint32_t hourbar_buff;
+  43:./menu.h      **** 
+  44:./menu.h      **** static inline void menu_update_hourbar(uint8_t dow)
+  45:./menu.h      **** {
+  46:./menu.h      **** 	hourbar_buff = RTC_DowTimerGetHourBar(dow);
+ 658               		.loc 2 46 0 discriminator 4
+ 659 0076 0E94 0000 		call RTC_DowTimerGetHourBar
+ 660               	.LVL71:
+ 661 007a 6093 0000 		sts hourbar_buff,r22
+ 662 007e 7093 0000 		sts hourbar_buff+1,r23
+ 663 0082 8093 0000 		sts hourbar_buff+2,r24
+ 664 0086 9093 0000 		sts hourbar_buff+3,r25
+ 665 008a 0895      		ret
+ 666               	.LBE11:
+ 667               	.LBE10:
+ 668               		.cfi_endproc
+ 669               	.LFE18:
+ 671               		.section	.text.RTC_Init,"ax",@progbits
+ 672               	.global	RTC_Init
+ 674               	RTC_Init:
+ 675               	.LFB2:
+ 105:../common/rtc.c **** #if !defined(MASTER_CONFIG_H)
+ 676               		.loc 1 105 0
+ 677               		.cfi_startproc
+ 678               	/* prologue: function */
+ 679               	/* frame size = 0 */
+ 680               	/* stack size = 0 */
+ 681               	.L__stack_usage = 0
+ 107:../common/rtc.c **** 	ASSR = (1 << AS2);                    // Timer2 asynchronous operation
+ 682               		.loc 1 107 0
+ 683 0000 8091 7000 		lds r24,112
+ 684 0004 8E7F      		andi r24,lo8(-2)
+ 685 0006 8093 7000 		sts 112,r24
+ 108:../common/rtc.c **** 	TCNT2 = 0;                          // clear TCNT2A
+ 686               		.loc 1 108 0
+ 687 000a 88E0      		ldi r24,lo8(8)
+ 688 000c 8093 B600 		sts 182,r24
+ 109:../common/rtc.c **** 	TCCR2A |= TCCR2A_INIT;    // select precaler: 32.768 kHz / 128 =
+ 689               		.loc 1 109 0
+ 690 0010 1092 B200 		sts 178,__zero_reg__
+ 110:../common/rtc.c **** 	// => 1 sec between each overflow
+ 691               		.loc 1 110 0
+ 692 0014 8091 B000 		lds r24,176
+ 693 0018 8560      		ori r24,lo8(5)
+ 694 001a 8093 B000 		sts 176,r24
+ 695               	.L56:
+ 114:../common/rtc.c **** 
+ 696               		.loc 1 114 0 discriminator 1
+ 697 001e 8091 B600 		lds r24,182
+ 698 0022 8570      		andi r24,lo8(5)
+ 699 0024 01F4      		brne .L56
+ 116:../common/rtc.c **** 	TIMSK2 |= (1 << TOIE2);               // enable Timer2 overflow interrupt
+ 700               		.loc 1 116 0
+ 701 0026 8FEF      		ldi r24,lo8(-1)
+ 702 0028 87BB      		out 0x17,r24
+ 117:../common/rtc.c **** #else
+ 703               		.loc 1 117 0
+ 704 002a 8091 7000 		lds r24,112
+ 705 002e 8160      		ori r24,lo8(1)
+ 706 0030 8093 7000 		sts 112,r24
+ 126:../common/rtc.c **** 
+ 707               		.loc 1 126 0
+ 708 0034 0E94 0000 		call RTC_SetDayOfWeek
+ 709               	.LVL72:
+ 710 0038 0895      		ret
+ 711               		.cfi_endproc
+ 712               	.LFE2:
+ 714               		.section	.text.RTC_SetDay,"ax",@progbits
+ 715               	.global	RTC_SetDay
+ 717               	RTC_SetDay:
+ 718               	.LFB3:
+ 137:../common/rtc.c **** 	uint8_t day_in_m = RTC_DaysOfMonth();
+ 719               		.loc 1 137 0
+ 720               		.cfi_startproc
+ 721               	.LVL73:
+ 722 0000 CF93      		push r28
+ 723               	.LCFI4:
+ 724               		.cfi_def_cfa_offset 3
+ 725               		.cfi_offset 28, -2
+ 726               	/* prologue: function */
+ 727               	/* frame size = 0 */
+ 728               	/* stack size = 1 */
+ 729               	.L__stack_usage = 1
+ 730 0002 C82F      		mov r28,r24
+ 138:../common/rtc.c **** 	RTC.DD = (uint8_t)(day + (-1 + day_in_m)) % day_in_m + 1;
+ 731               		.loc 1 138 0
+ 732 0004 0E94 0000 		call RTC_DaysOfMonth
+ 733               	.LVL74:
+ 734 0008 682F      		mov r22,r24
+ 735               	.LVL75:
+ 736 000a C150      		subi r28,lo8(-(-1))
+ 737               	.LVL76:
+ 139:../common/rtc.c **** 	RTC_SetDayOfWeek();
+ 738               		.loc 1 139 0
+ 739 000c 8C2F      		mov r24,r28
+ 740 000e 860F      		add r24,r22
+ 741 0010 0E94 0000 		call __udivmodqi4
+ 742 0014 9F5F      		subi r25,lo8(-(1))
+ 743 0016 9093 0000 		sts RTC+2,r25
+ 140:../common/rtc.c **** }
+ 744               		.loc 1 140 0
+ 745 001a 0E94 0000 		call RTC_SetDayOfWeek
+ 746               	.LVL77:
+ 747               	/* epilogue start */
+ 141:../common/rtc.c **** 
+ 748               		.loc 1 141 0
+ 749 001e CF91      		pop r28
+ 750               	.LVL78:
+ 751 0020 0895      		ret
+ 752               		.cfi_endproc
+ 753               	.LFE3:
+ 755               		.section	.text.RTC_SetMonth,"ax",@progbits
+ 756               	.global	RTC_SetMonth
+ 758               	RTC_SetMonth:
+ 759               	.LFB4:
+ 149:../common/rtc.c **** 	RTC.MM = (uint8_t)(month + (-1 + 12)) % 12 + 1;
+ 760               		.loc 1 149 0
+ 761               		.cfi_startproc
+ 762               	.LVL79:
+ 763               	/* prologue: function */
+ 764               	/* frame size = 0 */
+ 765               	/* stack size = 0 */
+ 766               	.L__stack_usage = 0
+ 150:../common/rtc.c **** 	RTC_SetDayOfWeek();
+ 767               		.loc 1 150 0
+ 768 0000 855F      		subi r24,lo8(-(11))
+ 769               	.LVL80:
+ 770 0002 6CE0      		ldi r22,lo8(12)
+ 771 0004 0E94 0000 		call __udivmodqi4
+ 772               	.LVL81:
+ 773 0008 9F5F      		subi r25,lo8(-(1))
+ 774 000a 9093 0000 		sts RTC+1,r25
+ 151:../common/rtc.c **** }
+ 775               		.loc 1 151 0
+ 776 000e 0E94 0000 		call RTC_SetDayOfWeek
+ 777               	.LVL82:
+ 778 0012 0895      		ret
+ 779               		.cfi_endproc
+ 780               	.LFE4:
+ 782               		.section	.text.RTC_SetYear,"ax",@progbits
+ 783               	.global	RTC_SetYear
+ 785               	RTC_SetYear:
+ 786               	.LFB5:
+ 160:../common/rtc.c **** 	RTC.YY = year;
+ 787               		.loc 1 160 0
+ 788               		.cfi_startproc
+ 789               	.LVL83:
+ 790               	/* prologue: function */
+ 791               	/* frame size = 0 */
+ 792               	/* stack size = 0 */
+ 793               	.L__stack_usage = 0
+ 161:../common/rtc.c **** 	RTC_SetDayOfWeek();
+ 794               		.loc 1 161 0
+ 795 0000 8093 0000 		sts RTC,r24
+ 162:../common/rtc.c **** }
+ 796               		.loc 1 162 0
+ 797 0004 0E94 0000 		call RTC_SetDayOfWeek
+ 798               	.LVL84:
+ 799 0008 0895      		ret
+ 800               		.cfi_endproc
+ 801               	.LFE5:
+ 803               		.section	.text.RTC_ActualTimerTemperature,"ax",@progbits
+ 804               	.global	RTC_ActualTimerTemperature
+ 806               	RTC_ActualTimerTemperature:
+ 807               	.LFB13:
+ 377:../common/rtc.c **** 	uint16_t minutes = RTC.hh * 60 + RTC.mm;
+ 808               		.loc 1 377 0
+ 809               		.cfi_startproc
+ 810               	.LVL85:
+ 811 0000 FF92      		push r15
+ 812               	.LCFI5:
+ 813               		.cfi_def_cfa_offset 3
+ 814               		.cfi_offset 15, -2
+ 815 0002 0F93      		push r16
+ 816               	.LCFI6:
+ 817               		.cfi_def_cfa_offset 4
+ 818               		.cfi_offset 16, -3
+ 819 0004 1F93      		push r17
+ 820               	.LCFI7:
+ 821               		.cfi_def_cfa_offset 5
+ 822               		.cfi_offset 17, -4
+ 823 0006 CF93      		push r28
+ 824               	.LCFI8:
+ 825               		.cfi_def_cfa_offset 6
+ 826               		.cfi_offset 28, -5
+ 827 0008 DF93      		push r29
+ 828               	.LCFI9:
+ 829               		.cfi_def_cfa_offset 7
+ 830               		.cfi_offset 29, -6
+ 831               	/* prologue: function */
+ 832               	/* frame size = 0 */
+ 833               	/* stack size = 5 */
+ 834               	.L__stack_usage = 5
+ 835 000a F82E      		mov r15,r24
+ 378:../common/rtc.c **** 	int8_t dow = ((config.timer_mode == 1) ? RTC.DOW : 0);
+ 836               		.loc 1 378 0
+ 837 000c 8091 0000 		lds r24,RTC+3
+ 838               	.LVL86:
+ 839 0010 C091 0000 		lds r28,RTC+4
+ 840 0014 D0E0      		ldi r29,0
+ 841 0016 9CE3      		ldi r25,lo8(60)
+ 842 0018 899F      		mul r24,r25
+ 843 001a C00D      		add r28,r0
+ 844 001c D11D      		adc r29,r1
+ 845 001e 1124      		clr __zero_reg__
+ 846               	.LVL87:
+ 379:../common/rtc.c **** 	int8_t raw_index = RTC_FindTimerRawIndex(dow, minutes);
+ 847               		.loc 1 379 0
+ 848 0020 8091 0000 		lds r24,config+34
+ 849 0024 8130      		cpi r24,lo8(1)
+ 850 0026 01F4      		brne .L65
+ 379:../common/rtc.c **** 	int8_t raw_index = RTC_FindTimerRawIndex(dow, minutes);
+ 851               		.loc 1 379 0 is_stmt 0 discriminator 1
+ 852 0028 0091 0000 		lds r16,RTC+6
+ 853 002c 00C0      		rjmp .L62
+ 854               	.L65:
+ 379:../common/rtc.c **** 	int8_t raw_index = RTC_FindTimerRawIndex(dow, minutes);
+ 855               		.loc 1 379 0
+ 856 002e 00E0      		ldi r16,0
+ 857               	.L62:
+ 858               	.LVL88:
+ 380:../common/rtc.c **** 	uint16_t data = eeprom_timers_read_raw(raw_index);
+ 859               		.loc 1 380 0 is_stmt 1 discriminator 4
+ 860 0030 BE01      		movw r22,r28
+ 861 0032 802F      		mov r24,r16
+ 862 0034 0E94 0000 		call RTC_FindTimerRawIndex
+ 863               	.LVL89:
+ 864 0038 182F      		mov r17,r24
+ 865               	.LVL90:
+ 381:../common/rtc.c **** 	if (raw_index < 0) return 0; //not found
+ 866               		.loc 1 381 0 discriminator 4
+ 867 003a 0E94 0000 		call eeprom_timers_read_raw
+ 868               	.LVL91:
+ 869 003e 9C01      		movw r18,r24
+ 870               	.LVL92:
+ 382:../common/rtc.c **** 	if (exact)
+ 871               		.loc 1 382 0 discriminator 4
+ 872 0040 17FD      		sbrc r17,7
+ 873 0042 00C0      		rjmp .L68
+ 383:../common/rtc.c **** 	{
+ 874               		.loc 1 383 0
+ 875 0044 FF20      		tst r15
+ 876 0046 01F0      		breq .L64
+ 385:../common/rtc.c **** 		if ((raw_index / RTC_TIMERS_PER_DOW) != dow) return 0;
+ 877               		.loc 1 385 0
+ 878 0048 9F70      		andi r25,15
+ 879 004a 8C17      		cp r24,r28
+ 880 004c 9D07      		cpc r25,r29
+ 881 004e 01F4      		brne .L68
+ 386:../common/rtc.c **** 	}
+ 882               		.loc 1 386 0
+ 883 0050 1595      		asr r17
+ 884 0052 1595      		asr r17
+ 885 0054 1595      		asr r17
+ 886               	.LVL93:
+ 887 0056 1013      		cpse r17,r16
+ 888 0058 00C0      		rjmp .L68
+ 889               	.L64:
+ 388:../common/rtc.c **** }
+ 890               		.loc 1 388 0
+ 891 005a F901      		movw r30,r18
+ 892 005c EF2F      		mov r30,r31
+ 893 005e FF27      		clr r31
+ 894 0060 E295      		swap r30
+ 895 0062 EF70      		andi r30,0x0f
+ 896 0064 E370      		andi r30,3
+ 897 0066 FF27      		clr r31
+ 898 0068 E050      		subi r30,lo8(-(config+1))
+ 899 006a F040      		sbci r31,hi8(-(config+1))
+ 900 006c 8081      		ld r24,Z
+ 901 006e 00C0      		rjmp .L63
+ 902               	.L68:
+ 382:../common/rtc.c **** 	if (exact)
+ 903               		.loc 1 382 0
+ 904 0070 80E0      		ldi r24,0
+ 905               	.L63:
+ 906               	/* epilogue start */
+ 389:../common/rtc.c **** #endif // !defined(MASTER_CONFIG_H)
+ 907               		.loc 1 389 0
+ 908 0072 CDB7      		in r28,__SP_L__
+ 909 0074 DEB7      		in r29,__SP_H__
+ 910               	.LVL94:
+ 911 0076 E5E0      		ldi r30, lo8(5)
+ 912 0078 0C94 0000 		jmp __epilogue_restores__ + ((18 - 5) * 2)
+ 913               		.cfi_endproc
+ 914               	.LFE13:
+ 916               		.section	.text.RTC_AddOneSecond,"ax",@progbits
+ 917               	.global	RTC_AddOneSecond
+ 919               	RTC_AddOneSecond:
+ 920               	.LFB14:
+ 408:../common/rtc.c **** #ifdef RTC_TICKS
+ 921               		.loc 1 408 0
+ 922               		.cfi_startproc
+ 923 0000 CF93      		push r28
+ 924               	.LCFI10:
+ 925               		.cfi_def_cfa_offset 3
+ 926               		.cfi_offset 28, -2
+ 927               	/* prologue: function */
+ 928               	/* frame size = 0 */
+ 929               	/* stack size = 1 */
+ 930               	.L__stack_usage = 1
+ 415:../common/rtc.c **** 	{
+ 931               		.loc 1 415 0
+ 932 0002 8091 0000 		lds r24,RTC+5
+ 933 0006 8F5F      		subi r24,lo8(-(1))
+ 934 0008 8C33      		cpi r24,lo8(60)
+ 935 000a 00F4      		brsh .L73
+ 936 000c 8093 0000 		sts RTC+5,r24
+ 937 0010 00C0      		rjmp .L72
+ 938               	.L73:
+ 417:../common/rtc.c **** 		// notify com.c about the changed minute
+ 939               		.loc 1 417 0
+ 940 0012 1092 0000 		sts RTC+5,__zero_reg__
+ 419:../common/rtc.c **** 		{
+ 941               		.loc 1 419 0
+ 942 0016 8091 0000 		lds r24,RTC+4
+ 943 001a 8F5F      		subi r24,lo8(-(1))
+ 944 001c 8C33      		cpi r24,lo8(60)
+ 945 001e 00F4      		brsh .L75
+ 946 0020 8093 0000 		sts RTC+4,r24
+ 947 0024 00C0      		rjmp .L72
+ 948               	.L75:
+ 421:../common/rtc.c **** 			// add one hour
+ 949               		.loc 1 421 0
+ 950 0026 1092 0000 		sts RTC+4,__zero_reg__
+ 423:../common/rtc.c **** 			{
+ 951               		.loc 1 423 0
+ 952 002a 8091 0000 		lds r24,RTC+3
+ 953 002e 8F5F      		subi r24,lo8(-(1))
+ 954 0030 8831      		cpi r24,lo8(24)
+ 955 0032 00F4      		brsh .L77
+ 956 0034 8093 0000 		sts RTC+3,r24
+ 957 0038 00C0      		rjmp .L78
+ 958               	.L77:
+ 425:../common/rtc.c **** 				RTC_AddOneDay();
+ 959               		.loc 1 425 0
+ 960 003a 1092 0000 		sts RTC+3,__zero_reg__
+ 961               	.LBB16:
+ 962               	.LBB17:
+ 465:../common/rtc.c **** 	if (++RTC.DD > dom)
+ 963               		.loc 1 465 0
+ 964 003e 0E94 0000 		call RTC_DaysOfMonth
+ 965               	.LVL95:
+ 466:../common/rtc.c **** 	{                   // Next Month
+ 966               		.loc 1 466 0
+ 967 0042 9091 0000 		lds r25,RTC+2
+ 968 0046 9F5F      		subi r25,lo8(-(1))
+ 969 0048 8917      		cp r24,r25
+ 970 004a 00F0      		brlo .L79
+ 971 004c 9093 0000 		sts RTC+2,r25
+ 972 0050 00C0      		rjmp .L80
+ 973               	.L79:
+ 468:../common/rtc.c **** 		if (++RTC.MM > 12)
+ 974               		.loc 1 468 0
+ 975 0052 91E0      		ldi r25,lo8(1)
+ 976 0054 9093 0000 		sts RTC+2,r25
+ 469:../common/rtc.c **** 		{                    // Next year
+ 977               		.loc 1 469 0
+ 978 0058 8091 0000 		lds r24,RTC+1
+ 979               	.LVL96:
+ 980 005c 8F5F      		subi r24,lo8(-(1))
+ 981 005e 8D30      		cpi r24,lo8(13)
+ 982 0060 00F4      		brsh .L81
+ 983 0062 8093 0000 		sts RTC+1,r24
+ 984 0066 00C0      		rjmp .L82
+ 985               	.L81:
+ 471:../common/rtc.c **** 			RTC.YY++;
+ 986               		.loc 1 471 0
+ 987 0068 9093 0000 		sts RTC+1,r25
+ 472:../common/rtc.c **** 		}
+ 988               		.loc 1 472 0
+ 989 006c 8091 0000 		lds r24,RTC
+ 990 0070 8F5F      		subi r24,lo8(-(1))
+ 991 0072 8093 0000 		sts RTC,r24
+ 992               	.L82:
+ 475:../common/rtc.c **** 	}
+ 993               		.loc 1 475 0
+ 994 0076 1092 0000 		sts RTC_DS,__zero_reg__
+ 995               	.L80:
+ 478:../common/rtc.c **** #if !defined(MASTER_CONFIG_H)
+ 996               		.loc 1 478 0
+ 997 007a 8091 0000 		lds r24,RTC+6
+ 998 007e 67E0      		ldi r22,lo8(7)
+ 999 0080 0E94 0000 		call __udivmodqi4
+ 1000 0084 81E0      		ldi r24,lo8(1)
+ 1001 0086 890F      		add r24,r25
+ 1002 0088 8093 0000 		sts RTC+6,r24
+ 481:../common/rtc.c **** #endif
+ 1003               		.loc 1 481 0
+ 1004 008c 9091 0000 		lds r25,config+34
+ 1005 0090 9130      		cpi r25,lo8(1)
+ 1006 0092 01F0      		breq .L83
+ 1007 0094 80E0      		ldi r24,0
+ 1008               	.L83:
+ 1009               	.LVL97:
+ 1010               	.LBB18:
+ 1011               	.LBB19:
+ 1012               		.loc 2 46 0
+ 1013 0096 0E94 0000 		call RTC_DowTimerGetHourBar
+ 1014               	.LVL98:
+ 1015 009a 6093 0000 		sts hourbar_buff,r22
+ 1016 009e 7093 0000 		sts hourbar_buff+1,r23
+ 1017 00a2 8093 0000 		sts hourbar_buff+2,r24
+ 1018 00a6 9093 0000 		sts hourbar_buff+3,r25
+ 1019               	.L78:
+ 1020               	.LBE19:
+ 1021               	.LBE18:
+ 1022               	.LBE17:
+ 1023               	.LBE16:
+ 429:../common/rtc.c **** 			{
+ 1024               		.loc 1 429 0
+ 1025 00aa C091 0000 		lds r28,RTC+1
+ 1026 00ae C330      		cpi r28,lo8(3)
+ 1027 00b0 01F4      		brne .L84
+ 429:../common/rtc.c **** 			{
+ 1028               		.loc 1 429 0 is_stmt 0 discriminator 1
+ 1029 00b2 8091 0000 		lds r24,RTC+3
+ 1030 00b6 8230      		cpi r24,lo8(2)
+ 1031 00b8 01F4      		brne .L72
+ 432:../common/rtc.c **** 				{
+ 1032               		.loc 1 432 0 is_stmt 1
+ 1033 00ba 0E94 0000 		call RTC_IsLastSunday
+ 1034               	.LVL99:
+ 1035 00be 8823      		tst r24
+ 1036 00c0 01F0      		breq .L72
+ 434:../common/rtc.c **** 				}
+ 1037               		.loc 1 434 0
+ 1038 00c2 C093 0000 		sts RTC+3,r28
+ 1039 00c6 00C0      		rjmp .L72
+ 1040               	.L84:
+ 438:../common/rtc.c **** 			{
+ 1041               		.loc 1 438 0
+ 1042 00c8 CA30      		cpi r28,lo8(10)
+ 1043 00ca 01F4      		brne .L72
+ 438:../common/rtc.c **** 			{
+ 1044               		.loc 1 438 0 is_stmt 0 discriminator 1
+ 1045 00cc 8091 0000 		lds r24,RTC+3
+ 1046 00d0 8330      		cpi r24,lo8(3)
+ 1047 00d2 01F4      		brne .L72
+ 438:../common/rtc.c **** 			{
+ 1048               		.loc 1 438 0 discriminator 2
+ 1049 00d4 8091 0000 		lds r24,RTC_DS
+ 1050 00d8 8111      		cpse r24,__zero_reg__
+ 1051 00da 00C0      		rjmp .L72
+ 441:../common/rtc.c **** 				{
+ 1052               		.loc 1 441 0 is_stmt 1
+ 1053 00dc 0E94 0000 		call RTC_IsLastSunday
+ 1054               	.LVL100:
+ 1055 00e0 8823      		tst r24
+ 1056 00e2 01F0      		breq .L72
+ 443:../common/rtc.c **** 					RTC_DS = 1;
+ 1057               		.loc 1 443 0
+ 1058 00e4 82E0      		ldi r24,lo8(2)
+ 1059 00e6 8093 0000 		sts RTC+3,r24
+ 444:../common/rtc.c **** 				}
+ 1060               		.loc 1 444 0
+ 1061 00ea 81E0      		ldi r24,lo8(1)
+ 1062 00ec 8093 0000 		sts RTC_DS,r24
+ 1063               	.L72:
+ 1064               	/* epilogue start */
+ 449:../common/rtc.c **** 
+ 1065               		.loc 1 449 0
+ 1066 00f0 CF91      		pop r28
+ 1067 00f2 0895      		ret
+ 1068               		.cfi_endproc
+ 1069               	.LFE14:
+ 1071               		.section	.text.RTC_timer_set,"ax",@progbits
+ 1072               	.global	RTC_timer_set
+ 1074               	RTC_timer_set:
+ 1075               	.LFB19:
+ 576:../common/rtc.c **** #endif    
+ 577:../common/rtc.c **** }
+ 578:../common/rtc.c **** #if 0
+ 579:../common/rtc.c **** /*!
+ 580:../common/rtc.c ****  *******************************************************************************
+ 581:../common/rtc.c ****  *
+ 582:../common/rtc.c ****  *  Set Date, and do all the range checking
+ 583:../common/rtc.c ****  *
+ 584:../common/rtc.c ****  *  \note
+ 585:../common/rtc.c ****  *     return true if date is valid and set, otherwise false
+ 586:../common/rtc.c ****  *
+ 587:../common/rtc.c ****  ******************************************************************************/
+ 588:../common/rtc.c **** bool RTC_SetDate(int8_t dd, int8_t mm, int8_t yy)
+ 589:../common/rtc.c **** {
+ 590:../common/rtc.c **** 	// Get current date for restauration in case of an error
+ 591:../common/rtc.c **** 	uint8_t old_yy = RTC_GetYearYY();
+ 592:../common/rtc.c **** 	uint8_t old_mm = RTC_GetMonth();
+ 593:../common/rtc.c **** 
+ 594:../common/rtc.c **** 	// Set and check values
+ 595:../common/rtc.c **** 	if (mm > 0 && mm < 13 && dd > 0)
+ 596:../common/rtc.c **** 	{
+ 597:../common/rtc.c **** 		RTC_SetYear(yy);
+ 598:../common/rtc.c **** 		RTC_SetMonth(mm);
+ 599:../common/rtc.c **** 		if (dd <= RTC_DaysOfMonth())
+ 600:../common/rtc.c **** 		{
+ 601:../common/rtc.c **** 			RTC_SetDay(dd);
+ 602:../common/rtc.c **** 			return true;
+ 603:../common/rtc.c **** 		}
+ 604:../common/rtc.c **** 	}
+ 605:../common/rtc.c **** 
+ 606:../common/rtc.c **** 	// Restore old date
+ 607:../common/rtc.c **** 	RTC_SetYear(old_yy);
+ 608:../common/rtc.c **** 	RTC_SetMonth(old_mm);
+ 609:../common/rtc.c **** 	return false;
+ 610:../common/rtc.c **** }
+ 611:../common/rtc.c **** #endif
+ 612:../common/rtc.c **** 
+ 613:../common/rtc.c **** uint8_t RTC_timer_todo = 0;
+ 614:../common/rtc.c **** uint8_t RTC_timer_done = 0;
+ 615:../common/rtc.c **** static uint8_t RTC_timer_time[RTC_TIMERS];
+ 616:../common/rtc.c **** #if defined(MASTER_CONFIG_H)
+ 617:../common/rtc.c **** static uint8_t RTC_next_compare;
+ 618:../common/rtc.c **** #endif
+ 619:../common/rtc.c **** 
+ 620:../common/rtc.c **** void RTC_timer_set(uint8_t timer_id, uint8_t time)
+ 621:../common/rtc.c **** {
+ 1076               		.loc 1 621 0
+ 1077               		.cfi_startproc
+ 1078               	.LVL101:
+ 1079               	/* prologue: function */
+ 1080               	/* frame size = 0 */
+ 1081               	/* stack size = 0 */
+ 1082               	.L__stack_usage = 0
+ 622:../common/rtc.c **** 	uint8_t t2, i, next, dif;
+ 623:../common/rtc.c **** 	// next is uninitialized, it is correct
+ 624:../common/rtc.c **** 
+ 625:../common/rtc.c **** 	cli();
+ 1083               		.loc 1 625 0
+ 1084               	/* #APP */
+ 1085               	 ;  625 "../common/rtc.c" 1
+ 1086 0000 F894      		cli
+ 1087               	 ;  0 "" 2
+ 626:../common/rtc.c **** 	RTC_timer_todo |= _BV(timer_id);
+ 1088               		.loc 1 626 0
+ 1089               	/* #NOAPP */
+ 1090 0002 E82F      		mov r30,r24
+ 1091 0004 F0E0      		ldi r31,0
+ 1092 0006 21E0      		ldi r18,lo8(1)
+ 1093 0008 30E0      		ldi r19,0
+ 1094 000a D901      		movw r26,r18
+ 1095 000c 00C0      		rjmp 2f
+ 1096               		1:
+ 1097 000e AA0F      		lsl r26
+ 1098 0010 BB1F      		rol r27
+ 1099               		2:
+ 1100 0012 8A95      		dec r24
+ 1101 0014 02F4      		brpl 1b
+ 1102 0016 CD01      		movw r24,r26
+ 1103               	.LVL102:
+ 1104 0018 9091 0000 		lds r25,RTC_timer_todo
+ 1105 001c 892B      		or r24,r25
+ 1106 001e 8093 0000 		sts RTC_timer_todo,r24
+ 627:../common/rtc.c **** 	RTC_timer_time[timer_id - 1] = time;
+ 1107               		.loc 1 627 0
+ 1108 0022 E050      		subi r30,lo8(-(RTC_timer_time-1))
+ 1109 0024 F040      		sbci r31,hi8(-(RTC_timer_time-1))
+ 1110               	.LVL103:
+ 1111 0026 6083      		st Z,r22
+ 628:../common/rtc.c **** 	t2 = TCNT2;
+ 1112               		.loc 1 628 0
+ 1113 0028 9091 B200 		lds r25,178
+ 1114               	.LVL104:
+ 629:../common/rtc.c **** 	dif = 255;
+ 630:../common/rtc.c **** 	for (i = 0; i < RTC_TIMERS; i++)
+ 631:../common/rtc.c **** 	{
+ 632:../common/rtc.c **** 		if ((RTC_timer_todo&(2 << i)))
+ 1115               		.loc 1 632 0
+ 1116 002c 81FD      		sbrc r24,1
+ 633:../common/rtc.c **** 		{
+ 634:../common/rtc.c **** 			if ((RTC_timer_time[i] - t2) <= dif)
+ 1117               		.loc 1 634 0
+ 1118 002e 4091 0000 		lds r20,RTC_timer_time
+ 1119               	.L94:
+ 1120               	.LVL105:
+ 635:../common/rtc.c **** 			{
+ 636:../common/rtc.c **** 				next = RTC_timer_time[i];
+ 637:../common/rtc.c **** 				dif = next - t2;
+ 638:../common/rtc.c **** 			}
+ 639:../common/rtc.c **** 		}
+ 640:../common/rtc.c **** 	}
+ 641:../common/rtc.c **** #if defined(MASTER_CONFIG_H)
+ 642:../common/rtc.c **** 	RTC_next_compare = next;
+ 643:../common/rtc.c **** #else
+ 644:../common/rtc.c **** 	if (OCR2A != next)
+ 1121               		.loc 1 644 0 discriminator 2
+ 1122 0032 8091 B300 		lds r24,179
+ 1123 0036 8417      		cp r24,r20
+ 1124 0038 01F0      		breq .L95
+ 1125               	.L99:
+ 645:../common/rtc.c **** 	{
+ 646:../common/rtc.c **** 		while (ASSR & (1 << OCR2UB))
+ 1126               		.loc 1 646 0 discriminator 1
+ 1127 003a 8091 B600 		lds r24,182
+ 1128 003e 81FD      		sbrc r24,1
+ 1129 0040 00C0      		rjmp .L99
+ 647:../common/rtc.c **** 		{
+ 648:../common/rtc.c **** 			;
+ 649:../common/rtc.c **** 		} // ATmega169 datasheet chapter 17.8.1
+ 650:../common/rtc.c **** 		OCR2A = next;
+ 1130               		.loc 1 650 0
+ 1131 0042 4093 B300 		sts 179,r20
+ 1132               	.L95:
+ 651:../common/rtc.c **** 	}
+ 652:../common/rtc.c **** #endif
+ 653:../common/rtc.c **** 	sei();
+ 1133               		.loc 1 653 0
+ 1134               	/* #APP */
+ 1135               	 ;  653 "../common/rtc.c" 1
+ 1136 0046 7894      		sei
+ 1137               	 ;  0 "" 2
+ 654:../common/rtc.c **** #if ! defined(MASTER_CONFIG_H)
+ 655:../common/rtc.c **** 	TIMSK2 |= (1 << OCIE2A); // enable interupt again
+ 1138               		.loc 1 655 0
+ 1139               	/* #NOAPP */
+ 1140 0048 8091 7000 		lds r24,112
+ 1141 004c 8260      		ori r24,lo8(2)
+ 1142 004e 8093 7000 		sts 112,r24
+ 1143 0052 0895      		ret
+ 1144               		.cfi_endproc
+ 1145               	.LFE19:
+ 1147               		.section	.text.__vector_5,"ax",@progbits
+ 1148               	.global	__vector_5
+ 1150               	__vector_5:
+ 1151               	.LFB20:
+ 656:../common/rtc.c **** #endif
+ 657:../common/rtc.c **** }
+ 658:../common/rtc.c **** 
+ 659:../common/rtc.c **** #if !defined(MASTER_CONFIG_H)
+ 660:../common/rtc.c **** /*!
+ 661:../common/rtc.c ****  *******************************************************************************
+ 662:../common/rtc.c ****  *
+ 663:../common/rtc.c ****  *  timer/counter2 overflow interrupt routine
+ 664:../common/rtc.c ****  *
+ 665:../common/rtc.c ****  *  \note
+ 666:../common/rtc.c ****  *  - add one second to internal clock
+ 667:../common/rtc.c ****  *
+ 668:../common/rtc.c ****  ******************************************************************************/
+ 669:../common/rtc.c **** #if !TASK_IS_SFR || DEBUG_PRINT_RTC_TICKS
+ 670:../common/rtc.c **** // not optimized
+ 671:../common/rtc.c **** ISR(TIMER2_OVF_vect)
+ 672:../common/rtc.c **** {
+ 673:../common/rtc.c **** 	task |= TASK_RTC;   // increment second and check Dow_Timer
+ 674:../common/rtc.c **** 	RTC_timer_done |= _BV(RTC_TIMER_OVF) | _BV(RTC_TIMER_RTC);
+ 675:../common/rtc.c **** #if (DEBUG_PRINT_RTC_TICKS)
+ 676:../common/rtc.c **** 	COM_putchar('|');
+ 677:../common/rtc.c **** #endif
+ 678:../common/rtc.c **** }
+ 679:../common/rtc.c **** #else
+ 680:../common/rtc.c **** // optimized
+ 681:../common/rtc.c **** ISR_NAKED ISR(TIMER2_OVF_vect)
+ 682:../common/rtc.c **** {
+ 1152               		.loc 1 682 0
+ 1153               		.cfi_startproc
+ 1154               	/* prologue: naked */
+ 1155               	/* frame size = 0 */
+ 1156               	/* stack size = 0 */
+ 1157               	.L__stack_usage = 0
+ 683:../common/rtc.c **** 	asm volatile(
+ 1158               		.loc 1 683 0
+ 1159               	/* #APP */
+ 1160               	 ;  683 "../common/rtc.c" 1
+ 1161               		__my_tmp_reg__ = 16
+ 1162 0000 0F93      		push __my_tmp_reg__
+ 1163 0002 0FB7      	   in __my_tmp_reg__,__SREG__
+ 1164 0004 0F93      		push __my_tmp_reg__
+ 1165 0006 F19A      		sbi 30,1	
+ 1166 0008 0091 0000 	   lds __my_tmp_reg__,RTC_timer_done
+ 1167 000c 0168      		ori __my_tmp_reg__,129
+ 1168 000e 0093 0000 	   sts RTC_timer_done,__my_tmp_reg__
+ 1169 0012 0F91      		pop __my_tmp_reg__
+ 1170 0014 0FBF      	   out __SREG__,__my_tmp_reg__
+ 1171 0016 0F91      		pop __my_tmp_reg__
+ 1172 0018 1895      		reti
+ 1173               	
+ 1174               	 ;  0 "" 2
+ 1175               	/* epilogue start */
+ 684:../common/rtc.c **** 		"__my_tmp_reg__ = 16" "\n"
+ 685:../common/rtc.c **** 		/* prologue */
+ 686:../common/rtc.c **** 		"	push __my_tmp_reg__" "\n"
+ 687:../common/rtc.c **** 		"   in __my_tmp_reg__,__SREG__" "\n"
+ 688:../common/rtc.c **** 		"	push __my_tmp_reg__" "\n"
+ 689:../common/rtc.c **** 		/* prologue end  */
+ 690:../common/rtc.c **** 		"	sbi %0,%1" "\t\n"
+ 691:../common/rtc.c **** 		"   lds __my_tmp_reg__,RTC_timer_done" "\n"
+ 692:../common/rtc.c **** 		"	ori __my_tmp_reg__,%2" "\n"
+ 693:../common/rtc.c **** 		"   sts RTC_timer_done,__my_tmp_reg__" "\n"
+ 694:../common/rtc.c **** 		/* epilogue */
+ 695:../common/rtc.c **** 		"	pop __my_tmp_reg__" "\n"
+ 696:../common/rtc.c **** 		"   out __SREG__,__my_tmp_reg__" "\n"
+ 697:../common/rtc.c **** 		"	pop __my_tmp_reg__" "\n"
+ 698:../common/rtc.c **** 		"	reti" "\n"
+ 699:../common/rtc.c **** 		/* epilogue end */
+ 700:../common/rtc.c **** 		::"I" (_SFR_IO_ADDR(task)), "I" (TASK_RTC_BIT), "M" (_BV(RTC_TIMER_OVF) | _BV(RTC_TIMER_RTC))
+ 701:../common/rtc.c **** 		);
+ 702:../common/rtc.c **** }
+ 1176               		.loc 1 702 0
+ 1177               	/* #NOAPP */
+ 1178               		.cfi_endproc
+ 1179               	.LFE20:
+ 1181               		.section	.text.__vector_4,"ax",@progbits
+ 1182               	.global	__vector_4
+ 1184               	__vector_4:
+ 1185               	.LFB21:
+ 703:../common/rtc.c **** #endif 
+ 704:../common/rtc.c **** extern volatile bool kb_timeout;
+ 705:../common/rtc.c **** /*!
+ 706:../common/rtc.c ****  *******************************************************************************
+ 707:../common/rtc.c ****  *
+ 708:../common/rtc.c ****  *  timer/counter2 compare interrupt routine
+ 709:../common/rtc.c ****  *
+ 710:../common/rtc.c ****  *  \note - clear keyboard timeout flag
+ 711:../common/rtc.c ****  *  \note - disable this interrupt
+ 712:../common/rtc.c ****  *
+ 713:../common/rtc.c ****  ******************************************************************************/
+ 714:../common/rtc.c **** ISR(TIMER2_COMP_vect)
+ 715:../common/rtc.c **** {
+ 1186               		.loc 1 715 0
+ 1187               		.cfi_startproc
+ 1188 0000 1F92      		push r1
+ 1189               	.LCFI11:
+ 1190               		.cfi_def_cfa_offset 3
+ 1191               		.cfi_offset 1, -2
+ 1192 0002 0F92      		push r0
+ 1193               	.LCFI12:
+ 1194               		.cfi_def_cfa_offset 4
+ 1195               		.cfi_offset 0, -3
+ 1196 0004 0FB6      		in r0,__SREG__
+ 1197 0006 0F92      		push r0
+ 1198 0008 1124      		clr __zero_reg__
+ 1199 000a 2F93      		push r18
+ 1200               	.LCFI13:
+ 1201               		.cfi_def_cfa_offset 5
+ 1202               		.cfi_offset 18, -4
+ 1203 000c 3F93      		push r19
+ 1204               	.LCFI14:
+ 1205               		.cfi_def_cfa_offset 6
+ 1206               		.cfi_offset 19, -5
+ 1207 000e 8F93      		push r24
+ 1208               	.LCFI15:
+ 1209               		.cfi_def_cfa_offset 7
+ 1210               		.cfi_offset 24, -6
+ 1211 0010 9F93      		push r25
+ 1212               	.LCFI16:
+ 1213               		.cfi_def_cfa_offset 8
+ 1214               		.cfi_offset 25, -7
+ 1215               	/* prologue: Signal */
+ 1216               	/* frame size = 0 */
+ 1217               	/* stack size = 7 */
+ 1218               	.L__stack_usage = 7
+ 716:../common/rtc.c **** 	uint8_t t2 = TCNT2 - 1;
+ 1219               		.loc 1 716 0
+ 1220 0012 9091 B200 		lds r25,178
+ 1221 0016 9150      		subi r25,lo8(-(-1))
+ 1222               	.LVL106:
+ 717:../common/rtc.c **** 	task |= TASK_RTC;
+ 1223               		.loc 1 717 0
+ 1224 0018 F19A      		sbi 0x1e,1
+ 718:../common/rtc.c **** #if (DEBUG_PRINT_RTC_TICKS)
+ 719:../common/rtc.c **** 	COM_putchar('%');
+ 720:../common/rtc.c **** #endif
+ 721:../common/rtc.c **** 	if ((RTC_timer_todo&_BV(RTC_TIMER_KB)) && (t2 == RTC_timer_time[RTC_TIMER_KB - 1]))
+ 1225               		.loc 1 721 0
+ 1226 001a 8091 0000 		lds r24,RTC_timer_todo
+ 1227 001e 81FF      		sbrs r24,1
+ 1228 0020 00C0      		rjmp .L104
+ 1229               		.loc 1 721 0 is_stmt 0 discriminator 1
+ 1230 0022 3091 0000 		lds r19,RTC_timer_time
+ 1231 0026 9313      		cpse r25,r19
+ 1232 0028 00C0      		rjmp .L104
+ 722:../common/rtc.c **** 	{
+ 723:../common/rtc.c **** 		kb_timeout = true;   // keyboard noise cancelation
+ 1233               		.loc 1 723 0 is_stmt 1
+ 1234 002a 91E0      		ldi r25,lo8(1)
+ 1235               	.LVL107:
+ 1236 002c 9093 0000 		sts kb_timeout,r25
+ 724:../common/rtc.c **** 		RTC_timer_todo &= ~_BV(RTC_TIMER_KB);
+ 1237               		.loc 1 724 0
+ 1238 0030 8D7F      		andi r24,lo8(-3)
+ 1239 0032 8093 0000 		sts RTC_timer_todo,r24
+ 1240               	.L104:
+ 1241               	.LVL108:
+ 725:../common/rtc.c **** 	}
+ 726:../common/rtc.c **** 		{
+ 727:../common/rtc.c **** 			uint8_t i;
+ 728:../common/rtc.c **** 			for (i = 2; i <= RTC_TIMERS; i++)
+ 729:../common/rtc.c **** 			{
+ 730:../common/rtc.c **** 				if ((RTC_timer_todo&_BV(i)) && (t2 == RTC_timer_time[i - 1]))
+ 731:../common/rtc.c **** 				{
+ 732:../common/rtc.c **** 					RTC_timer_done |= _BV(i);
+ 733:../common/rtc.c **** 					RTC_timer_todo &= ~_BV(i);
+ 734:../common/rtc.c **** 				}
+ 735:../common/rtc.c **** 			}
+ 736:../common/rtc.c **** 		}
+ 737:../common/rtc.c **** 		uint8_t dif = 255;
+ 738:../common/rtc.c **** 		uint8_t i, next;  // next is uninitialized, it is correct
+ 739:../common/rtc.c **** 		for (i = 0; i < RTC_TIMERS; i++)
+ 740:../common/rtc.c **** 		{
+ 741:../common/rtc.c **** 			if ((RTC_timer_todo&(2 << i)))
+ 1242               		.loc 1 741 0
+ 1243 0036 8091 0000 		lds r24,RTC_timer_todo
+ 1244 003a 81FD      		sbrc r24,1
+ 1245               	.LVL109:
+ 742:../common/rtc.c **** 			{
+ 743:../common/rtc.c **** 				if ((RTC_timer_time[i] - t2) <= dif)
+ 1246               		.loc 1 743 0
+ 1247 003c 2091 0000 		lds r18,RTC_timer_time
+ 1248               	.LVL110:
+ 1249               	.L105:
+ 744:../common/rtc.c **** 				{
+ 745:../common/rtc.c **** 					next = RTC_timer_time[i];
+ 746:../common/rtc.c **** 					dif = next - t2;
+ 747:../common/rtc.c **** 				}
+ 748:../common/rtc.c **** 			}
+ 749:../common/rtc.c **** 		}
+ 750:../common/rtc.c **** 		if (OCR2A != next)
+ 1250               		.loc 1 750 0 discriminator 2
+ 1251 0040 8091 B300 		lds r24,179
+ 1252 0044 8213      		cpse r24,r18
+ 751:../common/rtc.c **** 		{
+ 752:../common/rtc.c **** 			// while (ASSR & (1<<OCR2UB)) {;} // ATmega169 datasheet chapter 17.8.1
+ 753:../common/rtc.c **** 			// waiting is not needed, it not allow timer state machine
+ 754:../common/rtc.c **** 			OCR2A = next;
+ 1253               		.loc 1 754 0
+ 1254 0046 2093 B300 		sts 179,r18
+ 1255               	.L106:
+ 755:../common/rtc.c **** 		}
+ 756:../common/rtc.c **** 		if (RTC_timer_todo == 0) TIMSK2 &= ~(1 << OCIE2A);
+ 1256               		.loc 1 756 0
+ 1257 004a 8091 0000 		lds r24,RTC_timer_todo
+ 1258 004e 8111      		cpse r24,__zero_reg__
+ 1259 0050 00C0      		rjmp .L103
+ 1260               		.loc 1 756 0 is_stmt 0 discriminator 1
+ 1261 0052 8091 7000 		lds r24,112
+ 1262 0056 8D7F      		andi r24,lo8(-3)
+ 1263 0058 8093 7000 		sts 112,r24
+ 1264               	.L103:
+ 1265               	/* epilogue start */
+ 757:../common/rtc.c **** }
+ 1266               		.loc 1 757 0 is_stmt 1
+ 1267 005c 9F91      		pop r25
+ 1268 005e 8F91      		pop r24
+ 1269 0060 3F91      		pop r19
+ 1270 0062 2F91      		pop r18
+ 1271 0064 0F90      		pop r0
+ 1272 0066 0FBE      		out __SREG__,r0
+ 1273 0068 0F90      		pop r0
+ 1274 006a 1F90      		pop r1
+ 1275 006c 1895      		reti
+ 1276               		.cfi_endproc
+ 1277               	.LFE21:
+ 1279               		.section	.bss.RTC_timer_time,"aw",@nobits
+ 1282               	RTC_timer_time:
+ 1283 0000 00        		.zero	1
+ 1284               	.global	RTC_timer_done
+ 1285               		.section	.bss.RTC_timer_done,"aw",@nobits
+ 1288               	RTC_timer_done:
+ 1289 0000 00        		.zero	1
+ 1290               	.global	RTC_timer_todo
+ 1291               		.section	.bss.RTC_timer_todo,"aw",@nobits
+ 1294               	RTC_timer_todo:
+ 1295 0000 00        		.zero	1
+ 1296               		.section	.progmem.data.daysInYear,"a",@progbits
+ 1299               	daysInYear:
+ 1300 0000 0000      		.word	0
+ 1301 0002 1F00      		.word	31
+ 1302 0004 3B00      		.word	59
+ 1303 0006 5A00      		.word	90
+ 1304 0008 7800      		.word	120
+ 1305 000a 9700      		.word	151
+ 1306 000c B500      		.word	181
+ 1307 000e D400      		.word	212
+ 1308 0010 F300      		.word	243
+ 1309 0012 1101      		.word	273
+ 1310 0014 3001      		.word	304
+ 1311 0016 4E01      		.word	334
+ 1312               	.global	RTC_DayOfMonthTablePrgMem
+ 1313               		.section	.progmem.data.RTC_DayOfMonthTablePrgMem,"a",@progbits
+ 1316               	RTC_DayOfMonthTablePrgMem:
+ 1317 0000 1F        		.byte	31
+ 1318 0001 1C        		.byte	28
+ 1319 0002 1F        		.byte	31
+ 1320 0003 1E        		.byte	30
+ 1321 0004 1F        		.byte	31
+ 1322 0005 1E        		.byte	30
+ 1323 0006 1F        		.byte	31
+ 1324 0007 1F        		.byte	31
+ 1325 0008 1E        		.byte	30
+ 1326 0009 1F        		.byte	31
+ 1327 000a 1E        		.byte	30
+ 1328 000b 1F        		.byte	31
+ 1329               		.comm	RTC_DS,1,1
+ 1330               	.global	RTC
+ 1331               		.section	.data.RTC,"aw",@progbits
+ 1334               	RTC:
+ 1335 0000 11        		.byte	17
+ 1336 0001 0A        		.byte	10
+ 1337 0002 15        		.byte	21
+ 1338 0003 0C        		.byte	12
+ 1339 0004 00        		.byte	0
+ 1340 0005 00        		.byte	0
+ 1341 0006 00        		.byte	0
+ 1342               		.text
+ 1343               	.Letext0:
+ 1344               		.file 3 "q:\\winavr\\avr\\include\\stdint.h"
+ 1345               		.file 4 "./config.h"
+ 1346               		.file 5 "../common/../common/rtc.h"
+ 1347               		.file 6 "./eeprom.h"
+DEFINED SYMBOLS
+                            *ABS*:00000000 rtc.c
+C:\Users\Kaworu\AppData\Local\Temp\ccDO777s.s:2      *ABS*:0000003e __SP_H__
+C:\Users\Kaworu\AppData\Local\Temp\ccDO777s.s:3      *ABS*:0000003d __SP_L__
+C:\Users\Kaworu\AppData\Local\Temp\ccDO777s.s:4      *ABS*:0000003f __SREG__
+C:\Users\Kaworu\AppData\Local\Temp\ccDO777s.s:5      *ABS*:00000000 __tmp_reg__
+C:\Users\Kaworu\AppData\Local\Temp\ccDO777s.s:6      *ABS*:00000001 __zero_reg__
+C:\Users\Kaworu\AppData\Local\Temp\ccDO777s.s:12     .text.RTC_DaysOfMonth:00000000 RTC_DaysOfMonth
+C:\Users\Kaworu\AppData\Local\Temp\ccDO777s.s:1334   .data.RTC:00000000 RTC
+C:\Users\Kaworu\AppData\Local\Temp\ccDO777s.s:1316   .progmem.data.RTC_DayOfMonthTablePrgMem:00000000 RTC_DayOfMonthTablePrgMem
+C:\Users\Kaworu\AppData\Local\Temp\ccDO777s.s:56     .text.RTC_IsLastSunday:00000000 RTC_IsLastSunday
+C:\Users\Kaworu\AppData\Local\Temp\ccDO777s.s:98     .text.RTC_FindTimerRawIndex:00000000 RTC_FindTimerRawIndex
+C:\Users\Kaworu\AppData\Local\Temp\ccDO777s.s:250    .text.RTC_SetHour:00000000 RTC_SetHour
+C:\Users\Kaworu\AppData\Local\Temp\ccDO777s.s:273    .text.RTC_SetMinute:00000000 RTC_SetMinute
+C:\Users\Kaworu\AppData\Local\Temp\ccDO777s.s:296    .text.RTC_SetSecond:00000000 RTC_SetSecond
+C:\Users\Kaworu\AppData\Local\Temp\ccDO777s.s:319    .text.RTC_DowTimerSet:00000000 RTC_DowTimerSet
+C:\Users\Kaworu\AppData\Local\Temp\ccDO777s.s:390    .text.RTC_DowTimerGet:00000000 RTC_DowTimerGet
+C:\Users\Kaworu\AppData\Local\Temp\ccDO777s.s:437    .text.RTC_DowTimerGetHourBar:00000000 RTC_DowTimerGetHourBar
+C:\Users\Kaworu\AppData\Local\Temp\ccDO777s.s:570    .text.RTC_SetDayOfWeek:00000000 RTC_SetDayOfWeek
+C:\Users\Kaworu\AppData\Local\Temp\ccDO777s.s:1299   .progmem.data.daysInYear:00000000 daysInYear
+C:\Users\Kaworu\AppData\Local\Temp\ccDO777s.s:674    .text.RTC_Init:00000000 RTC_Init
+C:\Users\Kaworu\AppData\Local\Temp\ccDO777s.s:717    .text.RTC_SetDay:00000000 RTC_SetDay
+C:\Users\Kaworu\AppData\Local\Temp\ccDO777s.s:758    .text.RTC_SetMonth:00000000 RTC_SetMonth
+C:\Users\Kaworu\AppData\Local\Temp\ccDO777s.s:785    .text.RTC_SetYear:00000000 RTC_SetYear
+C:\Users\Kaworu\AppData\Local\Temp\ccDO777s.s:806    .text.RTC_ActualTimerTemperature:00000000 RTC_ActualTimerTemperature
+C:\Users\Kaworu\AppData\Local\Temp\ccDO777s.s:919    .text.RTC_AddOneSecond:00000000 RTC_AddOneSecond
+                            *COM*:00000001 RTC_DS
+C:\Users\Kaworu\AppData\Local\Temp\ccDO777s.s:1074   .text.RTC_timer_set:00000000 RTC_timer_set
+C:\Users\Kaworu\AppData\Local\Temp\ccDO777s.s:1294   .bss.RTC_timer_todo:00000000 RTC_timer_todo
+C:\Users\Kaworu\AppData\Local\Temp\ccDO777s.s:1282   .bss.RTC_timer_time:00000000 RTC_timer_time
+C:\Users\Kaworu\AppData\Local\Temp\ccDO777s.s:1150   .text.__vector_5:00000000 __vector_5
+C:\Users\Kaworu\AppData\Local\Temp\ccDO777s.s:1161   *ABS*:00000010 __my_tmp_reg__
+C:\Users\Kaworu\AppData\Local\Temp\ccDO777s.s:1288   .bss.RTC_timer_done:00000000 RTC_timer_done
+C:\Users\Kaworu\AppData\Local\Temp\ccDO777s.s:1184   .text.__vector_4:00000000 __vector_4
+
+UNDEFINED SYMBOLS
+__prologue_saves__
+eeprom_timers_read_raw
+__divmodhi4
+__epilogue_restores__
+__udivmodqi4
+eeprom_timers_write
+__udivmodhi4
+config
+hourbar_buff
+kb_timeout
+__do_copy_data
+__do_clear_bss

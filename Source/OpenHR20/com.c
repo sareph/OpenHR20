@@ -65,7 +65,7 @@ static uint8_t tx_buff_out = 0;
 static uint8_t rx_buff_in = 0;
 static uint8_t rx_buff_out = 0;
 
-static uint8_t sys_info_mode = 0;
+static uint8_t sys_info_mode = 1;
 
 /*!
  *******************************************************************************
@@ -760,8 +760,8 @@ void COM_commad_parse(void)
 					break;
 				}
 				CTL_change_mode(com_hex[0]);
-				menu_view(true);
 				COM_print_debug(1);
+				menu_view(true);
 				break;
 			}
 			case 'A':

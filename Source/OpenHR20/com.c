@@ -35,6 +35,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <avr/wdt.h>
+#include <util/crc16.h>
 
 
 #include "config.h"
@@ -393,6 +394,16 @@ void COM_print_system_info(uint8_t type)
 	{
 		si.flags |= SI_FLAG_MENU_LOCKED;
 	}
+	
+	uint16_t crc = 0xFFFF;
+	uint8_t *b = (uint8_t*)&si;
+	
+	for (uint16_t i = 0; i < sizeof(struct system_info); ++i)
+	{
+		crc = _crc16_update(crc, b[i]);
+	}
+			
+	si.crc16 = crc;
 
 	char *pTxBuf = (char*)&si;
 	for (int i = 0; i < sizeof(struct system_info); ++i)
